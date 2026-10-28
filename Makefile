@@ -20,6 +20,10 @@ test:
 	@nvim -c "nvim -c 'lua vim.opt.rtp:append(vim.uv.cwd())' -l tests/utils_spec.lua"
 	@nvim --headless --clean -c 'lua vim.opt.rtp:append(vim.uv.cwd())' -l tests/websocket_spec.lua
 
+.PHONY: e2e
+e2e:
+	@node tests/e2e/run.mjs
+
 .PHONY: test_html
 test_html:
 	@nvim --headless -c "e tests/index.html" -c "LivePreview"
