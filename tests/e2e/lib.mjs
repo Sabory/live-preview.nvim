@@ -28,8 +28,13 @@ export async function startNvim({ file = "a.md", env = {} } = {}) {
 		env: { ...process.env, LP_PORT: PORT, LP_FILE: file, ...env },
 		stdio: "ignore",
 	});
-	await until(() => existsSync(socket), "nvim to listen");
-	await until(async () => (await fetch(ORIGIN).catch(() => null)) !== null, "the preview server");
+	try {
+		await until(() => existsSync(socket), "nvim to listen");
+		await until(async () => (await fetch(ORIGIN).catch(() => null)) !== null, "the preview server");
+	} catch (error) {
+		nvim.kill();
+		throw error;
+	}
 	const remote = (flag, arg) => execFileSync("nvim", ["--server", socket, flag, arg]).toString().trim();
 	return {
 		expr: (expression) => remote("--remote-expr", expression),
