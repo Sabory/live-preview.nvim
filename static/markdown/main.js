@@ -11,6 +11,11 @@ const md = window.markdownit({
 	}
 });
 md.use(livepreview_injectLinenumbersPlugin);
+// Static files are read from disk but the template that lists them lives in
+// Neovim's memory: after an update, a running Neovim may not load this script.
+if (typeof livepreview_alertsPlugin === "function") {
+	md.use(livepreview_alertsPlugin);
+}
 
 md.use(markdownitEmoji);
 
