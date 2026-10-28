@@ -91,28 +91,27 @@ function M.serve_file(client, file_path, if_none_match, accept)
 			return
 		end
 
-		local etag = generate_etag(file_path)
-
-		if if_none_match and if_none_match == etag then
-			M.send_http_response(client, "304 Not Modified", get_content_type(file_path) or "", "", {
-				["ETag"] = etag,
+		-- Only convert to HTML if the client accepts text/html
+		-- This prevents converting SVG files that are referenced by <img> tags
+		local filetype = supported_filetype(file_path)
+		if filetype and accept and accept:match("text/html") then
+			body = filetype == "html" and handle_body(body) or toHTML(body, filetype)
+			-- The page also depends on the template and config loaded in this
+			-- Neovim, which no file mtime reflects: never let the browser reuse it.
+			M.send_http_response(client, "200 OK", "text/html; charset=UTF-8", body, {
+				["Cache-Control"] = "no-store",
 			})
 			return
 		end
 
-		local filetype = supported_filetype(file_path)
+		local etag = generate_etag(file_path)
 		local content_type = get_content_type(file_path) or ""
 
-		-- Only convert to HTML if the client accepts text/html
-		-- This prevents converting SVG files that are referenced by <img> tags
-		local accepts_html = accept and accept:match("text/html")
-		if filetype and accepts_html then
-			if filetype ~= "html" then
-				body = toHTML(body, filetype)
-			else
-				body = handle_body(body)
-			end
-			content_type = "text/html; charset=UTF-8"
+		if if_none_match and if_none_match == etag then
+			M.send_http_response(client, "304 Not Modified", content_type, "", {
+				["ETag"] = etag,
+			})
+			return
 		end
 
 		M.send_http_response(client, "200 OK", content_type, body, {
