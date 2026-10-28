@@ -19,6 +19,22 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+/**
+ * Outermost rendered blocks overlapping a source line range, so nested ones are
+ * not counted twice
+ * @param {number} startLine - 1-indexed
+ * @param {number} endLine - 1-indexed, inclusive
+ * @returns {Element[]}
+ */
+function livepreview_blocksIn(startLine, endLine) {
+	const overlapping = [...document.querySelectorAll(".markdown-body [data-source-end]")].filter((block) => {
+		const start = parseInt(block.getAttribute("data-source-line"));
+		const end = parseInt(block.getAttribute("data-source-end"));
+		return start <= endLine && end >= startLine;
+	});
+	return overlapping.filter((block) => !overlapping.some((other) => other !== block && other.contains(block)));
+}
+
 function livepreview_injectLinenumbersPlugin(md) {
 	//
 	// Inject the 1-indexed, inclusive source line range of each block, for sync

@@ -74,14 +74,7 @@
 		};
 	}
 
-	// Outermost blocks overlapping the lines, so nested ones are not counted twice.
-	function blocksIn(startLine, endLine) {
-		const overlapping = [...document.querySelectorAll(".markdown-body [data-source-end]")].filter((block) => {
-			const [start, end] = lineRange(block);
-			return start <= endLine && end >= startLine;
-		});
-		return overlapping.filter((block) => !overlapping.some((other) => other !== block && other.contains(block)));
-	}
+	const blocksIn = livepreview_blocksIn;
 
 	// The selection's text and the DOM's text nodes disagree on whitespace
 	// between blocks, so match the quote ignoring all whitespace.
