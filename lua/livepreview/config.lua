@@ -17,6 +17,7 @@ M.pickers = {
 ---@field browser string? browser to open the preview in
 ---@field dynamic_root boolean? Whether to use the basename of the file as the root
 ---@field sync_scroll boolean? Whether to sync scroll the preview with the editor
+---@field comments LivePreviewCommentProvider|false? Enables commenting in the Markdown preview; see `livepreview.comments`
 M.default = {
 	picker = "",
 	address = "127.0.0.1",
@@ -24,6 +25,7 @@ M.default = {
 	browser = "default",
 	dynamic_root = false,
 	sync_scroll = true,
+	comments = false,
 }
 
 M.config = vim.deepcopy(M.default)

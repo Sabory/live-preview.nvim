@@ -39,6 +39,10 @@ let livepreview_reload
 
 const currentPath = () => decodeURIComponent(window.location.pathname);
 
+// Replies to livepreview_request(), keyed by request id.
+const pendingRequests = new Map();
+let lastRequestId = 0;
+
 /**
  * Send a message to Neovim
  * @param {object} message - JSON message, with a `type`
@@ -49,6 +53,20 @@ function livepreview_send(message) {
 	} else {
 		socket.addEventListener("open", () => socket.send(JSON.stringify(message)), { once: true });
 	}
+}
+
+/**
+ * Send a message to Neovim and wait for its reply
+ * @param {string} type - message type
+ * @param {object} payload - other fields of the message
+ * @returns {Promise<any>} - the result, rejected with Neovim's error
+ */
+function livepreview_request(type, payload = {}) {
+	const request_id = ++lastRequestId;
+	return new Promise((resolve, reject) => {
+		pendingRequests.set(request_id, { resolve, reject });
+		livepreview_send({ ...payload, type, request_id });
+	});
 }
 
 // Scrolling to follow Neovim, or the browser restoring the position on a
@@ -144,6 +162,14 @@ async function connectWebSocket() {
 			if (message.path !== currentPath()) {
 				window.location.assign(encodeURI(message.path));
 			}
+		} else if (message.type === "reply") {
+			const pending = pendingRequests.get(message.request_id);
+			if (pending) {
+				pendingRequests.delete(message.request_id);
+				message.error ? pending.reject(new Error(message.error)) : pending.resolve(message.result);
+			}
+		} else if (message.type === "comments") {
+			window.dispatchEvent(new CustomEvent("livepreview:comments"));
 		} else if (message.type === "scroll") {
 			console.log("Scroll message received");
 			const { filepath, cursor } = message;

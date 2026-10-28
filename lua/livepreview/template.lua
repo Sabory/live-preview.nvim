@@ -17,7 +17,7 @@ local function html_escape(text)
 	return (text:gsub("[&<>\"']", html_escapes))
 end
 
-local html_template = function(body, stylesheet, script_tag)
+local html_template = function(body, stylesheet, script_tag, after_ws_client)
 	return [[
         <!DOCTYPE html>
         <html lang="en">
@@ -41,6 +41,7 @@ local html_template = function(body, stylesheet, script_tag)
 			</style>
 ]] .. script_tag .. [[
 			<script defer src='/live-preview.nvim/static/ws-client.js'></script>
+]] .. (after_ws_client or "") .. [[
         </head>
 
         <body>
@@ -56,7 +57,9 @@ M.md2html = function(md)
 	local script =
 		[[<script defer src="/live-preview.nvim/static/markdown/line-numbers.js"></script><script defer src="/live-preview.nvim/static/markdown/markdown-it-emoji.min.js"></script><script defer src='/live-preview.nvim/static/markdown/markdown-it.min.js'></script><script defer src='/live-preview.nvim/static/markdown/markdown-it-katex.js'></script><script defer src='/live-preview.nvim/static/markdown/main.js'></script>]]
 	local stylesheet = [[<link rel="stylesheet" href="/live-preview.nvim/static/markdown/github-markdown.min.css">]]
-	return html_template(html_escape(md), stylesheet, script)
+	local comments = require("livepreview.config").config.comments
+		and [[<link rel="stylesheet" href="/live-preview.nvim/static/comments/comments.css"><script defer src="/live-preview.nvim/static/comments/comments.js"></script>]]
+	return html_template(html_escape(md), stylesheet, script, comments)
 end
 
 M.adoc2html = function(adoc)

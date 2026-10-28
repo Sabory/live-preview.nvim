@@ -96,6 +96,16 @@ local function on_message(client, message)
 			return
 		end
 		M.reveal(message.path, message.line)
+	elseif vim.startswith(message.type or "", "comment") then
+		require("livepreview.comments").handle(client, message)
+	end
+end
+
+--- Make the browsers reload their comment list, e.g. after the comment
+--- provider changed it from Neovim
+function M.refresh_comments()
+	if M.is_running() then
+		server.broadcast({ type = "comments" })
 	end
 end
 

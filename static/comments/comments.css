@@ -1,0 +1,335 @@
+:root {
+	--lp-surface: #ffffff;
+	--lp-raised: #f6f8fa;
+	--lp-border: #d0d7de;
+	--lp-fg: #1f2328;
+	--lp-muted: #656d76;
+	--lp-accent: #0969da;
+	--lp-accent-fg: #ffffff;
+	--lp-danger: #cf222e;
+	--lp-mark: rgba(212, 167, 44, 0.35);
+	--lp-mark-pending: rgba(9, 105, 218, 0.25);
+	--lp-shadow: 0 8px 24px rgba(140, 149, 159, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--lp-surface: #161b22;
+		--lp-raised: #21262d;
+		--lp-border: #30363d;
+		--lp-fg: #e6edf3;
+		--lp-muted: #8d96a0;
+		--lp-accent: #2f81f7;
+		--lp-mark: rgba(187, 128, 9, 0.4);
+		--lp-mark-pending: rgba(47, 129, 247, 0.3);
+		--lp-shadow: 0 8px 24px rgba(1, 4, 9, 0.8);
+	}
+}
+
+/* Room for the topbar and, when open, the panel. */
+body {
+	padding-top: 44px;
+}
+
+body.lp-panel-open {
+	margin-right: min(380px, 100vw);
+}
+
+.lp-topbar,
+.lp-panel,
+.lp-composer,
+.lp-toast,
+.lp-selection-button,
+.lp-badge {
+	font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	color: var(--lp-fg);
+}
+
+.lp-topbar button,
+.lp-panel button,
+.lp-composer button {
+	font: inherit;
+	color: inherit;
+	background: var(--lp-raised);
+	border: 1px solid var(--lp-border);
+	border-radius: 6px;
+	padding: 4px 10px;
+	cursor: pointer;
+}
+
+.lp-topbar button:hover,
+.lp-panel button:hover,
+.lp-composer button:hover {
+	border-color: var(--lp-muted);
+}
+
+button.lp-primary {
+	background: var(--lp-accent);
+	border-color: var(--lp-accent);
+	color: var(--lp-accent-fg);
+}
+
+.lp-topbar svg,
+.lp-panel svg,
+.lp-selection-button svg,
+.lp-badge svg {
+	width: 16px;
+	height: 16px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.lp-topbar {
+	position: fixed;
+	top: 8px;
+	right: 12px;
+	z-index: 30;
+}
+
+.lp-split {
+	display: flex;
+}
+
+.lp-split .lp-icon-button {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	border-radius: 6px 0 0 6px;
+}
+
+.lp-split .lp-chevron {
+	border-left: none;
+	border-radius: 0 6px 6px 0;
+	padding: 4px 6px;
+}
+
+.lp-count:empty {
+	display: none;
+}
+
+.lp-menu {
+	position: absolute;
+	right: 0;
+	top: 34px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px;
+	min-width: 180px;
+	background: var(--lp-surface);
+	border: 1px solid var(--lp-border);
+	border-radius: 8px;
+	box-shadow: var(--lp-shadow);
+}
+
+.lp-menu button {
+	text-align: left;
+	border: none;
+	background: transparent;
+}
+
+.lp-menu button:hover {
+	background: var(--lp-raised);
+}
+
+.lp-panel {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: min(380px, 100vw);
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	background: var(--lp-surface);
+	border-left: 1px solid var(--lp-border);
+	box-shadow: var(--lp-shadow);
+}
+
+.lp-panel[hidden],
+.lp-menu[hidden],
+.lp-composer[hidden],
+.lp-selection-button[hidden] {
+	display: none;
+}
+
+.lp-panel header,
+.lp-panel footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--lp-border);
+}
+
+.lp-panel header h2 {
+	flex: 1;
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	border: none;
+}
+
+.lp-panel header .lp-icon-button {
+	display: flex;
+	padding: 4px;
+	border: none;
+	background: transparent;
+}
+
+.lp-panel footer {
+	justify-content: flex-end;
+	border-top: 1px solid var(--lp-border);
+	border-bottom: none;
+}
+
+.lp-list {
+	flex: 1;
+	overflow-y: auto;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.lp-empty {
+	color: var(--lp-muted);
+	text-align: center;
+	margin-top: 32px;
+}
+
+.lp-card {
+	padding: 10px 12px;
+	border: 1px solid var(--lp-border);
+	border-radius: 8px;
+	background: var(--lp-raised);
+	cursor: pointer;
+	transition: box-shadow 0.3s;
+}
+
+.lp-card.lp-flash {
+	box-shadow: 0 0 0 2px var(--lp-accent);
+}
+
+.lp-card-meta {
+	display: flex;
+	gap: 8px;
+	color: var(--lp-muted);
+	font-size: 12px;
+}
+
+.lp-file {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.lp-card p {
+	margin: 6px 0;
+	white-space: pre-wrap;
+}
+
+.lp-card blockquote,
+.lp-composer blockquote {
+	margin: 6px 0;
+	padding-left: 8px;
+	border-left: 3px solid var(--lp-mark);
+	color: var(--lp-muted);
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.lp-card textarea,
+.lp-composer textarea {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 6px 0;
+	padding: 6px 8px;
+	font: inherit;
+	color: inherit;
+	background: var(--lp-surface);
+	border: 1px solid var(--lp-border);
+	border-radius: 6px;
+	resize: vertical;
+}
+
+.lp-card-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+}
+
+.lp-card-actions button {
+	padding: 2px 8px;
+	font-size: 12px;
+}
+
+.lp-composer {
+	position: absolute;
+	z-index: 35;
+	padding: 10px;
+	background: var(--lp-surface);
+	border: 1px solid var(--lp-border);
+	border-radius: 8px;
+	box-shadow: var(--lp-shadow);
+}
+
+.lp-selection-button,
+.lp-badge {
+	position: absolute;
+	z-index: 20;
+	display: flex;
+	padding: 5px;
+	background: var(--lp-surface);
+	border: 1px solid var(--lp-border);
+	border-radius: 6px;
+	box-shadow: var(--lp-shadow);
+	cursor: pointer;
+}
+
+.lp-badge {
+	padding: 3px;
+	color: var(--lp-muted);
+	box-shadow: none;
+}
+
+.lp-badge:hover {
+	color: var(--lp-accent);
+}
+
+.lp-commented {
+	background: var(--lp-mark);
+	border-radius: 4px;
+}
+
+::highlight(lp-comment) {
+	background-color: var(--lp-mark);
+}
+
+::highlight(lp-pending) {
+	background-color: var(--lp-mark-pending);
+}
+
+.lp-toast {
+	position: fixed;
+	left: 50%;
+	bottom: 20px;
+	transform: translateX(-50%);
+	z-index: 50;
+	padding: 8px 14px;
+	background: var(--lp-surface);
+	border: 1px solid var(--lp-border);
+	border-radius: 8px;
+	box-shadow: var(--lp-shadow);
+}
+
+.lp-toast--error {
+	border-color: var(--lp-danger);
+	color: var(--lp-danger);
+}
