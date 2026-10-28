@@ -37,6 +37,57 @@ const isRightPath = (filepath) => {
 
 let livepreview_reload
 
+const currentPath = () => decodeURIComponent(window.location.pathname);
+
+/**
+ * Send a message to Neovim
+ * @param {object} message - JSON message, with a `type`
+ */
+function livepreview_send(message) {
+	if (socket.readyState === WebSocket.OPEN) {
+		socket.send(JSON.stringify(message));
+	} else {
+		socket.addEventListener("open", () => socket.send(JSON.stringify(message)), { once: true });
+	}
+}
+
+// Scrolling to follow Neovim, or the browser restoring the position on a
+// reload, must not be reported back as the reader scrolling.
+let followingEditorUntil = Date.now() + 1000;
+
+function sourceLineOf(element) {
+	const block = element && element.closest("[data-source-line]");
+	return block ? parseInt(block.getAttribute("data-source-line")) : null;
+}
+
+// The block at the middle of the viewport, which Neovim then centers too.
+function lineAtViewportCenter() {
+	let line = null;
+	for (const block of document.querySelectorAll("[data-source-line]")) {
+		if (block.getBoundingClientRect().top > window.innerHeight / 2) break;
+		line = parseInt(block.getAttribute("data-source-line"));
+	}
+	return line;
+}
+
+let scrollTimer;
+let lastRevealedLine;
+window.addEventListener("scroll", () => {
+	clearTimeout(scrollTimer);
+	scrollTimer = setTimeout(() => {
+		if (Date.now() < followingEditorUntil) return;
+		const line = lineAtViewportCenter();
+		if (line === null || line === lastRevealedLine) return;
+		lastRevealedLine = line;
+		livepreview_send({ type: "reveal", path: currentPath(), line, from_scroll: true });
+	}, 150);
+});
+
+document.addEventListener("dblclick", (event) => {
+	const line = sourceLineOf(event.target);
+	if (line !== null) livepreview_send({ type: "reveal", path: currentPath(), line });
+});
+
 async function connectWebSocket() {
 	socket = new WebSocket(wsUrl);
 
@@ -45,6 +96,8 @@ async function connectWebSocket() {
 			window.location.reload();
 		}
 		connected = true;
+		// Also on a back/forward navigation served from the browser's cache.
+		livepreview_send({ type: "open", path: currentPath() });
 		console.log("Connected to server");
 		console.log("connected: ", connected);
 		livepreview_reload = 0;
@@ -87,10 +140,15 @@ async function connectWebSocket() {
 					}
 				}
 			}
+		} else if (message.type === "navigate") {
+			if (message.path !== currentPath()) {
+				window.location.assign(encodeURI(message.path));
+			}
 		} else if (message.type === "scroll") {
 			console.log("Scroll message received");
 			const { filepath, cursor } = message;
 			if (isRightPath(filepath)) {
+				followingEditorUntil = Date.now() + 1000;
 				const line = document.querySelector(`[data-source-line="${cursor[0]}"]`);
 				if (line) {
 					line.scrollIntoView({ behavior: "smooth", block: "center" });

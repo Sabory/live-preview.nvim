@@ -8,6 +8,11 @@ local config = require("livepreview.config")
 ---@type LivePreviewServer?
 M.serverObj = nil
 
+--- The window the preview follows: it was started from there, the browser
+--- navigates when that window opens another file, and vice versa.
+---@type integer?
+M.source_win = nil
+
 --- Stop live-preview server
 function M.close()
 	if M.serverObj then
@@ -23,6 +28,75 @@ end
 --- @return boolean
 function M.is_running()
 	return not not (M.serverObj and M.serverObj.server)
+end
+
+--- URL path under which the server serves a file, nil outside its webroot
+---@param file string
+---@return string?
+function M.url_path(file)
+	if not M.serverObj or not utils.supported_filetype(file) then
+		return
+	end
+	local relative = utils.get_relative_path(file, M.serverObj.webroot)
+	return relative and "/" .. relative
+end
+
+---@param path string URL path, as sent by the browser
+---@return string
+function M.file_for(path)
+	return vim.fs.normalize(vim.fs.joinpath(M.serverObj.webroot, path))
+end
+
+local function source_buf_is(file)
+	local win = M.source_win
+	if not win or not vim.api.nvim_win_is_valid(win) then
+		return false
+	end
+	return vim.fs.normalize(vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))) == file
+end
+
+--- Open in the source window the file the browser has just shown
+---@param file string
+function M.show_in_source(file)
+	local win = M.source_win
+	if not win or not vim.api.nvim_win_is_valid(win) or source_buf_is(file) then
+		return
+	end
+	local ok, err = pcall(vim.api.nvim_win_call, win, function()
+		vim.cmd.edit(vim.fn.fnameescape(file))
+	end)
+	if not ok then
+		vim.notify("live-preview.nvim: " .. err, vim.log.levels.WARN)
+	end
+end
+
+--- Put the source window's cursor on a line of the previewed file
+---@param path string URL path of the previewed file
+---@param line integer
+function M.reveal(path, line)
+	if not source_buf_is(M.file_for(path)) then
+		return
+	end
+	local win = M.source_win
+	line = math.max(1, math.min(line, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))))
+	vim.api.nvim_win_call(win, function()
+		vim.api.nvim_win_set_cursor(0, { line, 0 })
+		vim.cmd("normal! zz")
+	end)
+	server.mark_cursor_synced()
+end
+
+---@param client uv_tcp_t
+---@param message table
+local function on_message(client, message)
+	if message.type == "open" then
+		M.show_in_source(M.file_for(message.path))
+	elseif message.type == "reveal" then
+		if message.from_scroll and not config.config.sync_scroll then
+			return
+		end
+		M.reveal(message.path, message.line)
+	end
 end
 
 --- Start live-preview server
@@ -52,6 +126,7 @@ function M.start(filepath, port)
 	end
 	M.close()
 
+	M.source_win = vim.api.nvim_get_current_win()
 	M.serverObj = server.Server:new(config.config.dynamic_root and vim.fs.dirname(filepath) or nil)
 	local function onTextChanged(client)
 		local bufname = vim.api.nvim_buf_get_name(0)
@@ -81,6 +156,20 @@ function M.start(filepath, port)
 			TextChanged = vim.schedule_wrap(onTextChanged),
 			TextChangedI = vim.schedule_wrap(onTextChanged),
 		},
+		on_message = on_message,
+	})
+
+	vim.api.nvim_create_autocmd("BufWinEnter", {
+		group = "LivePreview",
+		callback = function(args)
+			if vim.api.nvim_get_current_win() ~= M.source_win then
+				return
+			end
+			local path = M.url_path(vim.fs.normalize(vim.api.nvim_buf_get_name(args.buf)))
+			if path then
+				server.broadcast({ type = "navigate", path = path })
+			end
+		end,
 	})
 
 	return true

@@ -62,6 +62,21 @@ local function send_scroll()
 	need_scroll = false
 end
 
+--- Send a JSON message to every connected browser
+--- @param message table
+function M.broadcast(message)
+	for _, client in ipairs(M.connecting_clients) do
+		websocket.send_json(client, message)
+	end
+end
+
+--- Take the current cursor line as already shown, so a cursor move made to
+--- follow the browser is not echoed back to it as a scroll.
+function M.mark_cursor_synced()
+	cursor_line = api.nvim_win_get_cursor(0)[1]
+	need_scroll = false
+end
+
 --- Drop a client from the broadcast list and close its socket
 --- @param client uv_tcp_t: client connection
 function M.forget_client(client)
