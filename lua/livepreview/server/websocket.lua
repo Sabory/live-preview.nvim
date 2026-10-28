@@ -50,10 +50,12 @@ function M.send(client, message)
 		frame = frame
 			.. string.char(127)
 			.. string.char(
-				bit.rshift(length, 56),
-				bit.rshift(length, 48) % 256,
-				bit.rshift(length, 40) % 256,
-				bit.rshift(length, 32) % 256,
+				-- WHY: LuaJIT's bit ops are 32-bit and take the shift modulo 32, so
+				-- shifting by 32 or more would repeat the low bytes here.
+				0,
+				0,
+				0,
+				0,
 				bit.rshift(length, 24) % 256,
 				bit.rshift(length, 16) % 256,
 				bit.rshift(length, 8) % 256,

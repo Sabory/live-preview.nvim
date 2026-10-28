@@ -33,4 +33,10 @@ assert(#fragments == 1 and fragments[1].opcode == 1 and fragments[1].payload == 
 
 local close = decode(masked_frame(0x88, ""))
 assert(close[1].opcode == 8, "should report a close frame")
+
+print()
+print("send()")
+local sent
+websocket.send({ write = function(_, frame) sent = frame end }, string.rep("x", 70000))
+assert(sent:sub(1, 10) == string.char(0x81, 127, 0, 0, 0, 0, 0, 1, 0x11, 0x70), "should encode a 64-bit length")
 print("ok")
