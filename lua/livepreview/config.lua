@@ -18,6 +18,7 @@ M.pickers = {
 ---@field dynamic_root boolean? Whether to use the basename of the file as the root
 ---@field sync_scroll boolean? Whether to sync scroll the preview with the editor
 ---@field comments LivePreviewCommentProvider|false? Enables commenting in the Markdown preview; see `livepreview.comments`
+---@field hunks (fun(bufnr: integer): {type: "add"|"change"|"delete", start_line: integer, end_line: integer}[])|false? Changed lines to mark in the Markdown preview, e.g. from gitsigns
 M.default = {
 	picker = "",
 	address = "127.0.0.1",
@@ -26,6 +27,7 @@ M.default = {
 	dynamic_root = false,
 	sync_scroll = true,
 	comments = false,
+	hunks = false,
 }
 
 M.config = vim.deepcopy(M.default)

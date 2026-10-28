@@ -168,8 +168,6 @@ async function connectWebSocket() {
 				pendingRequests.delete(message.request_id);
 				message.error ? pending.reject(new Error(message.error)) : pending.resolve(message.result);
 			}
-		} else if (message.type === "comments") {
-			window.dispatchEvent(new CustomEvent("livepreview:comments"));
 		} else if (message.type === "scroll") {
 			console.log("Scroll message received");
 			const { filepath, cursor } = message;
@@ -193,6 +191,9 @@ async function connectWebSocket() {
 					closest.scrollIntoView({ behavior: "smooth", block: "center" });
 				}
 			}
+		} else {
+			// For the optional page scripts (comments, hunks).
+			window.dispatchEvent(new CustomEvent(`livepreview:${message.type}`, { detail: message }));
 		}
 	};
 

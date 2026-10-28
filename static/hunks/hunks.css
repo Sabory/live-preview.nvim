@@ -1,0 +1,43 @@
+:root {
+	--lp-hunk-add: #1a7f37;
+	--lp-hunk-change: #9a6700;
+	--lp-hunk-delete: #cf222e;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--lp-hunk-add: #3fb950;
+		--lp-hunk-change: #d29922;
+		--lp-hunk-delete: #f85149;
+	}
+}
+
+/* Narrow panes drop the page's side padding; keep room for the bars. */
+body {
+	padding-left: 16px;
+}
+
+.lp-hunk {
+	position: absolute;
+	width: 3px;
+	border-radius: 2px;
+	pointer-events: none;
+}
+
+.lp-hunk--add {
+	background: var(--lp-hunk-add);
+}
+
+.lp-hunk--change {
+	background: var(--lp-hunk-change);
+}
+
+.lp-hunk--delete {
+	width: 0;
+	height: 0;
+	margin-top: -5px;
+	border-radius: 0;
+	border-top: 5px solid transparent;
+	border-bottom: 5px solid transparent;
+	border-left: 6px solid var(--lp-hunk-delete);
+}

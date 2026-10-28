@@ -90,7 +90,12 @@ end
 ---@param message table
 local function on_message(client, message)
 	if message.type == "open" then
-		M.show_in_source(M.file_for(message.path))
+		local file = M.file_for(message.path)
+		M.show_in_source(file)
+		local bufnr = vim.fn.bufnr(file)
+		if bufnr > 0 then
+			M.refresh_hunks(bufnr)
+		end
 	elseif message.type == "reveal" then
 		if message.from_scroll and not config.config.sync_scroll then
 			return
@@ -98,6 +103,19 @@ local function on_message(client, message)
 		M.reveal(message.path, message.line)
 	elseif vim.startswith(message.type or "", "comment") then
 		require("livepreview.comments").handle(client, message)
+	end
+end
+
+--- Send a buffer's changed lines, from the `hunks` provider, to the browsers
+---@param bufnr integer
+function M.refresh_hunks(bufnr)
+	local provider = config.config.hunks
+	if not provider or not M.is_running() then
+		return
+	end
+	local path = M.url_path(vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr)))
+	if path then
+		server.broadcast({ type = "hunks", path = path, hunks = provider(bufnr) })
 	end
 end
 
