@@ -32,6 +32,7 @@ local operating_system = uv.os_uname().sysname
 
 ---@class ServerStartOptions
 ---@field on_events? table<string, function(client:userdata):void>
+---@field on_message? fun(client: uv_tcp_t, message: table) a JSON message sent by a browser
 
 --- Send a scroll message to a WebSocket client
 --- The message is a table with the following
@@ -223,12 +224,28 @@ function Server:start(ip, port, opts)
 					-- handler.request returns nil only after a WebSocket
 					-- upgrade, and broadcasts must reach nothing else.
 					table.insert(M.connecting_clients, client)
-					-- Reads were stopped once the upgrade request was buffered,
-					-- so a closed tab would go unnoticed. Clients never send
-					-- frames upstream, so any read event means it is over.
+					-- Reads were stopped once the upgrade request was buffered;
+					-- resume them to receive the browser's messages and notice
+					-- a closed tab.
+					local decode = websocket.decoder()
 					client:read_start(function(read_err, chunk)
 						if read_err or not chunk then
 							M.forget_client(client)
+							return
+						end
+						for _, frame in ipairs(decode(chunk)) do
+							if frame.opcode == 8 then
+								M.forget_client(client)
+								return
+							end
+							if frame.opcode == 1 and opts.on_message then
+								vim.schedule(function()
+									local ok, message = pcall(vim.json.decode, frame.payload)
+									if ok and type(message) == "table" then
+										opts.on_message(client, message)
+									end
+								end)
+							end
 						end
 					end)
 				end

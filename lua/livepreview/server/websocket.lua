@@ -73,4 +73,67 @@ function M.send_json(client, message)
 	M.send(client, json)
 end
 
+--- Incremental decoder for frames sent by a client. Browsers always mask them,
+--- and a read can carry part of a frame or several frames at once.
+--- @return fun(chunk: string): {opcode: integer, payload: string}[]
+function M.decoder()
+	local buffer = ""
+	local fragmented
+	return function(chunk)
+		buffer = buffer .. chunk
+		local frames = {}
+		while #buffer >= 2 do
+			local b1, b2 = buffer:byte(1, 2)
+			local length = bit.band(b2, 0x7f)
+			local offset = 2
+			if length == 126 then
+				if #buffer < 4 then
+					break
+				end
+				length = buffer:byte(3) * 256 + buffer:byte(4)
+				offset = 4
+			elseif length == 127 then
+				if #buffer < 10 then
+					break
+				end
+				length = 0
+				for i = 3, 10 do
+					length = length * 256 + buffer:byte(i)
+				end
+				offset = 10
+			end
+			local mask_length = bit.band(b2, 0x80) ~= 0 and 4 or 0
+			local frame_end = offset + mask_length + length
+			if #buffer < frame_end then
+				break
+			end
+			local payload = buffer:sub(offset + mask_length + 1, frame_end)
+			if mask_length > 0 then
+				local mask = { buffer:byte(offset + 1, offset + 4) }
+				local bytes = {}
+				for i = 1, length do
+					bytes[i] = string.char(bit.bxor(payload:byte(i), mask[(i - 1) % 4 + 1]))
+				end
+				payload = table.concat(bytes)
+			end
+			buffer = buffer:sub(frame_end + 1)
+
+			local fin = bit.band(b1, 0x80) ~= 0
+			local opcode = bit.band(b1, 0x0f)
+			if opcode == 0 and fragmented then
+				fragmented.payload = fragmented.payload .. payload
+				if fin then
+					table.insert(frames, fragmented)
+					fragmented = nil
+				end
+			elseif not fin then
+				fragmented = { opcode = opcode, payload = payload }
+			else
+				table.insert(frames, { opcode = opcode, payload = payload })
+			end
+		end
+		return frames
+	end
+end
+
 return M

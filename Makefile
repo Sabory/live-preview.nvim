@@ -18,6 +18,7 @@ update_readme:
 .PHONY: test
 test: 
 	@nvim -c "nvim -c 'lua vim.opt.rtp:append(vim.uv.cwd())' -l tests/utils_spec.lua"
+	@nvim --headless --clean -c 'lua vim.opt.rtp:append(vim.uv.cwd())' -l tests/websocket_spec.lua
 
 .PHONY: test_html
 test_html:
