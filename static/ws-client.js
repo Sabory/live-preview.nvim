@@ -1,5 +1,5 @@
 const wsUrl = getWebSocketUrl();
-let socket = new WebSocket(wsUrl);
+let socket;
 let connected = true;
 
 function getWebSocketUrl() {
@@ -123,8 +123,8 @@ async function connectWebSocket() {
 	};
 }
 
+connectWebSocket();
 window.onload = () => {
-	connectWebSocket();
 	setInterval(() => {
 		if (!connected) {
 			connectWebSocket();
