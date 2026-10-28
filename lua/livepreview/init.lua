@@ -101,6 +101,12 @@ local function on_message(client, message)
 			return
 		end
 		M.reveal(message.path, message.line)
+	elseif message.type == "files" then
+		require("livepreview.server.websocket").send_json(client, {
+			type = "reply",
+			request_id = message.request_id,
+			result = utils.list_markdown_files(M.serverObj.webroot),
+		})
 	elseif vim.startswith(message.type or "", "comment") then
 		require("livepreview.comments").handle(client, message)
 	end

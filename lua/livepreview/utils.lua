@@ -75,6 +75,23 @@ function M.list_supported_files(directory)
 	return relative_paths
 end
 
+--- Find Markdown files in a directory and its subdirectories. Inside a git
+--- repository git lists them, so ignored folders like node_modules are never walked.
+--- @param directory string
+--- @return string[]: sorted relative paths (compared to `directory`)
+function M.list_markdown_files(directory)
+	local git = vim.system(
+		{ "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md", "*.markdown" },
+		{ cwd = directory, text = true }
+	):wait()
+	local files = git.code == 0 and vim.split(git.stdout, "\0", { trimempty = true })
+		or vim.tbl_filter(function(file)
+			return M.supported_filetype(file) == "markdown"
+		end, M.list_supported_files(directory))
+	table.sort(files)
+	return files
+end
+
 --- Get the path where live-preview.nvim is installed
 --- @return string
 function M.get_plugin_path()

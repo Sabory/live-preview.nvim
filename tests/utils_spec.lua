@@ -31,6 +31,22 @@ local supported_files = utils.list_supported_files(plugin_path)
 assert(type(supported_files) == "table" and #supported_files > 0, "should return a table with values")
 
 print()
+print("list_markdown_files()")
+local markdown_files = utils.list_markdown_files(plugin_path)
+assert(vim.tbl_contains(markdown_files, "README.md"), "should list README.md")
+assert(vim.tbl_contains(markdown_files, "tests/test with space.md"), "should list nested files")
+assert(not vim.tbl_contains(markdown_files, "tests/test.adoc"), "should skip non-Markdown files")
+local outside_git = vim.fn.tempname()
+vim.fn.mkdir(outside_git .. "/notes", "p")
+vim.fn.writefile({}, outside_git .. "/notes/b.md")
+vim.fn.writefile({}, outside_git .. "/a.markdown")
+vim.fn.writefile({}, outside_git .. "/c.txt")
+assert(
+	vim.deep_equal(utils.list_markdown_files(outside_git), { "a.markdown", "notes/b.md" }),
+	"should walk the directory outside a git repository"
+)
+
+print()
 print("read_file()")
 local raw_packspec = utils.read_file(vim.fs.joinpath(plugin_path, "pkg.json"))
 assert(type(raw_packspec) == "string" and #raw_packspec > 0, "should return a string with content")
