@@ -23,8 +23,12 @@ md.use(markdownitEmoji);
 // This prevents markdown-it from corrupting LaTeX syntax before KaTeX can render it
 md.use(markdownitKatex);
 
+// YAML front matter is metadata, not content. Blank it out line for line so
+// the rendered blocks keep their source line numbers.
+const withoutFrontMatter = (text) => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, (block) => block.replace(/[^\n]/g, ""));
+
 const livepreview_render = (text) => {
-	const html = md.render(text);
+	const html = md.render(withoutFrontMatter(text));
 	document.querySelector('.markdown-body').innerHTML = html;
 	hljs.highlightAll();
 }
