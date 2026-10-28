@@ -128,6 +128,22 @@ const tests = {
 		await until(() => browser.js(`location.pathname === "/a.md"`), "the preview to follow the source");
 	},
 
+	async "tree: list, open and hide the Markdown files"({ nvim, browser }) {
+		await browser.open("/a.md");
+		await until(() => browser.js(`document.querySelectorAll(".lp-tree a").length === 5`), "five files in the tree");
+		const entries = await browser.js(`[...document.querySelectorAll(".lp-tree summary, .lp-tree a")].map((e) => e.textContent).join(",")`);
+		assert(entries === "notes,nested.md,a.md,alerts.md,long.md,other.md", `folders first, then files: ${entries}`);
+		assert((await browser.js(`document.querySelector(".lp-tree [aria-current]").textContent`)) === "a.md", "the current file is marked");
+
+		await browser.js(`document.querySelector(".lp-tree a[href='/notes/nested.md']").click()`);
+		await until(() => nvim.expr("expand('%:t')") === "nested.md", "the source to follow the tree");
+		await until(() => browser.js(`document.querySelector(".lp-tree [aria-current]")?.closest("details")?.open === true`), "the current file's folder to open");
+
+		await browser.js(`document.querySelector(".lp-tree-toggle").click()`);
+		await browser.open("/a.md");
+		assert(await browser.js(`!document.body.classList.contains("lp-tree-open")`), "a hidden tree stays hidden");
+	},
+
 	async "cache: a page reflects the Neovim serving it"({ browser }, restart) {
 		let nvim = await restart({ env: { LP_NO_COMMENTS: "1" } });
 		await browser.open("/a.md");
