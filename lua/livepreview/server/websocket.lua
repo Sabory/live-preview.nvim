@@ -5,6 +5,7 @@
 --- ```
 
 local sha1 = require("livepreview.utils").sha1
+local header = require("livepreview.server.utils.header")
 
 local M = {}
 
@@ -12,7 +13,7 @@ local M = {}
 --- @param client uv_tcp_t: client
 --- @param request string: client request
 function M.handshake(client, request)
-	local key = request:match("Sec%-WebSocket%-Key: ([^\r\n]+)")
+	local key = header.get(request, "Sec-WebSocket-Key")
 	if not key then
 		vim.print("Invalid WebSocket request from client")
 		client:close()

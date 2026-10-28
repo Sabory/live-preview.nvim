@@ -11,6 +11,7 @@ local toHTML = require("livepreview.template").toHTML
 local handle_body = require("livepreview.template").handle_body
 local get_content_type = require("livepreview.server.utils.content_type").get
 local generate_etag = require("livepreview.server.utils.etag").generate
+local header = require("livepreview.server.utils.header")
 
 local M = {}
 
@@ -61,15 +62,15 @@ end
 ---@param request string: HTTP request
 ---@return {path: string, if_none_match: string, accept: string} | nil : path to the file and If-None-Match header
 function M.request(client, request)
-	if request:match("Upgrade: websocket") then
+	if (header.get(request, "Upgrade") or ""):lower() == "websocket" then
 		websocket.handshake(client, request)
 		return
 	end
 	local path = request:match("GET ([^%s]+) HTTP/1.1")
 	local path_decoded = path and vim.uri_decode(path) or "/"
 
-	local if_none_match = request:match("If%-None%-Match: ([^\r\n]+)")
-	local accept = request:match("Accept: ([^\r\n]+)") or ""
+	local if_none_match = header.get(request, "If-None-Match")
+	local accept = header.get(request, "Accept") or ""
 
 	return {
 		path = path_decoded,
