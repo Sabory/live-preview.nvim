@@ -19,6 +19,7 @@ M.pickers = {
 ---@field sync_scroll boolean? Whether to sync scroll the preview with the editor
 ---@field comments LivePreviewCommentProvider|false? Enables commenting in the Markdown preview; see `livepreview.comments`
 ---@field hunks (fun(bufnr: integer): {type: "add"|"change"|"delete", start_line: integer, end_line: integer}[])|false? Changed lines to mark in the Markdown preview, e.g. from gitsigns
+---@field file_tree boolean? Whether to list the root's Markdown files in a sidebar of the Markdown preview
 M.default = {
 	picker = "",
 	address = "127.0.0.1",
@@ -28,6 +29,7 @@ M.default = {
 	sync_scroll = true,
 	comments = false,
 	hunks = false,
+	file_tree = true,
 }
 
 M.config = vim.deepcopy(M.default)

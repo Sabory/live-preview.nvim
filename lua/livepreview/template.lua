@@ -67,6 +67,10 @@ M.md2html = function(md)
 		page_scripts = page_scripts
 			.. [[<link rel="stylesheet" href="/live-preview.nvim/static/hunks/hunks.css"><script defer src="/live-preview.nvim/static/hunks/hunks.js"></script>]]
 	end
+	if config.file_tree then
+		page_scripts = page_scripts
+			.. [[<link rel="stylesheet" href="/live-preview.nvim/static/tree/tree.css"><script defer src="/live-preview.nvim/static/tree/tree.js"></script>]]
+	end
 	return html_template(html_escape(md), stylesheet, script, page_scripts)
 end
 
