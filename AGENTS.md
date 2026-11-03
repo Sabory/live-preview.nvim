@@ -5,6 +5,11 @@ preview. Neovim owns the source and serves the page; the page talks back over th
 (`livepreview_request` in `static/ws-client.js`, handlers routed from `on_message` in
 `lua/livepreview/init.lua`).
 
+In-place editing lives in `static/edit/`: `edit.js` is the core (state, edit mode, writes,
+focus, key routing) and exposes `livepreview_edit`; `toolbar.js` (formats, block actions) and
+`structure.js` (Enter, Tab, table rows, shortcuts, checkboxes) add to it; `source.js` and
+`blocks.js` are pure text transforms. Neovim's side is `lua/livepreview/source.lua`.
+
 ## QA
 
 Every feature is checked end to end before it is called done.
