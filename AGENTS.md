@@ -20,3 +20,19 @@ Every feature is checked end to end before it is called done.
   re-renders from (`socketClient().inbox`).
 - Cover the refusal path too: a stale `expected` must return an error and write nothing.
 - Edits must also work on a file that is not open in Neovim (a hidden buffer gets no TextChanged).
+- Neovim writes a new file and renames it over the old one, so a read in between throws ENOENT.
+  Poll disk through `readLines()` in `run.mjs`, which reads a missing file as empty.
+- A test that needs its own document writes it under `nvim.root` instead of adding a fixture: the
+  tree test counts the fixture files.
+- Drive the page like a user, through CDP (`browser.cdp`): `Input.insertText` types at the caret,
+  `Input.dispatchKeyEvent` presses keys, `clickOn()` clicks through the page's own handlers.
+  Setting `textContent` or calling handlers directly skips what the feature depends on.
+- End every test with `browser.errors` empty.
+- Run a suite twice before calling it green: timing bugs (renders, writes) pass once by luck.
+
+### Visual QA
+
+Tests prove the file is right, not that the page looks right. Before committing UI, take
+screenshots with the same helpers (`startNvim`, `startBrowser`, `browser.screenshot`) on a
+realistic document, set the viewport with `Emulation.setDeviceMetricsOverride`, and look at
+them: read mode, a block being edited, the page after saving, and any fallback state.
