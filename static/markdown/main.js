@@ -37,12 +37,14 @@ let livepreview_holdRender = () => false;
 let livepreview_heldText = null;
 
 const livepreview_render = (text) => {
+	// WHY: the next edit is patched against this even while the page waits to
+	// re-render; Neovim refuses it if the lines moved in between.
+	livepreview_source = text;
 	if (livepreview_holdRender()) {
 		livepreview_heldText = text;
 		return;
 	}
 	livepreview_heldText = null;
-	livepreview_source = text;
 	document.querySelector('.markdown-body').innerHTML = livepreview_toHtml(text);
 	hljs.highlightAll();
 }
