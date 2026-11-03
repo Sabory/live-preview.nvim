@@ -504,6 +504,36 @@
 		rowButton.style.left = `${rect.left + window.scrollX}px`;
 	}
 
+	// --- Markdown shortcuts -------------------------------------------------------
+
+	// Typed at the start of a paragraph, a marker and a space turn it into that
+	// block, as Notion does; the marker is not written as text.
+	const SHORTCUT = /^(#{1,3}|[-*]|1\.|>) /;
+	const SHORTCUT_KIND = { "#": "h1", "##": "h2", "###": "h3", "-": "bullet", "*": "bullet", "1.": "numbered", ">": "quote" };
+	const KIND_TAG = { h1: "h1", h2: "h2", h3: "h3", bullet: "li", numbered: "li", quote: "p" };
+
+	function onShortcutTyped(host) {
+		if (host.tagName !== "P" || host.parentElement !== markdownBody()) return;
+		const match = host.textContent.match(SHORTCUT);
+		if (match && caretOffset(host) === match[0].length) {
+			applyShortcut(SHORTCUT_KIND[match[1]], host.textContent.slice(match[0].length));
+		}
+	}
+
+	async function applyShortcut(kind, rest) {
+		const state = editing;
+		editing = null;
+		hideToolbar();
+		state.host.blur();
+		await lastWrite;
+		const { target, block, attempt, conflict } = typedSource(state, rest);
+		if (conflict) return refuse();
+		if (block === undefined) return openRaw(target, attempt);
+		if (!(await write(target, livepreview_blocks.turnInto(kind, block.split("\n"))))) return;
+		flushHeldRender();
+		focusBlock(KIND_TAG[kind], target.where.startLine, 0);
+	}
+
 	// --- Formatting a selection --------------------------------------------------
 
 	function selectionIn(host) {
@@ -802,6 +832,9 @@
 	});
 
 	document.addEventListener("selectionchange", () => requestAnimationFrame(placeToolbar));
+	document.addEventListener("input", (event) => {
+		if (editing && event.target === editing.host && !editing.pending) onShortcutTyped(editing.host);
+	});
 
 	// Shift+click extends the block selection from the block being edited or selected.
 	document.addEventListener(

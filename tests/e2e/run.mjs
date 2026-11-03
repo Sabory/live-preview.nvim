@@ -499,6 +499,36 @@ const tests = {
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
+	async "edit: Markdown shortcuts at the start of a paragraph"({ nvim, browser }) {
+		const file = join(nvim.root, "shortcuts.md");
+		writeFileSync(file, "# S\n\nfirst **bold**\n\nsecond\n\nthird\n\nfourth\n");
+		const source = () => readLines(file).join("\n");
+		// One key at a time, as typed: the shortcut fires on the space.
+		const typeAtStart = async (selector, keys) => {
+			await browser.js(caretAt(selector, 0));
+			for (const key of keys) await browser.cdp("Input.insertText", { text: key });
+		};
+		const focused = (tag, text) => browser.js(`document.activeElement.tagName === "${tag}" && document.activeElement.textContent === ${JSON.stringify(text)}`);
+		await browser.open("/shortcuts.md");
+		await press(browser, "e");
+
+		await typeAtStart(".markdown-body > p", "## ");
+		await until(() => source().includes("\n## first **bold**\n"), `## makes a heading and keeps the markup: ${source()}`);
+		await until(() => focused("H2", "first bold"), "the caret in the heading");
+		await typeAtStart(".markdown-body > p", "- ");
+		await until(() => source().includes("\n- second\n"), `- makes a list: ${source()}`);
+		await until(() => focused("LI", "second"), "the caret in the item");
+		await typeAtStart(".markdown-body > p", "1. ");
+		await until(() => source().includes("\n1. third\n"), `1. makes a numbered list: ${source()}`);
+		await typeAtStart(".markdown-body > p", "> ");
+		await until(() => source().includes("\n> fourth\n"), `> makes a quote: ${source()}`);
+		await until(() => focused("P", "fourth"), "the caret in the quote");
+		await browser.cdp("Input.insertText", { text: "!" });
+		await leave(browser);
+		await until(() => source().includes("\n> !fourth\n"), `typing goes on in the quote: ${source()}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
 	async "render: front matter, line ranges and alerts"({ browser }) {
 		await browser.open("/a.md");
 		const blocks = await browser.js(`JSON.stringify([...document.querySelector(".markdown-body").children].map((e) => [e.tagName, e.dataset.sourceLine, e.dataset.sourceEnd]))`);
