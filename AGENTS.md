@@ -45,6 +45,13 @@ Every feature is checked end to end before it is called done.
 - A `received()` wait on text the source already had before the edit passes at once. To wait for
   a removal (a marker toggled off), wait until the old text is gone instead.
 
+- markdown-it puts the blank line after a list in the range of its last item. Every list
+  operation (add, split, delete, fill an empty item) must be tested on the last item of a list
+  followed by more text, or it eats that blank line and the text after joins the list.
+- When a fix only moves a failure to the next step of the same test, stop fixing step by step:
+  find what the steps share (here, that blank line) and check every remaining step against it
+  before the next run.
+
 ### Debugging a flaky or failing step
 
 Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
@@ -59,5 +66,8 @@ screenshots with the same helpers (`startNvim`, `startBrowser`, `browser.screens
 realistic document, set the viewport with `Emulation.setDeviceMetricsOverride`, and look at
 them: read mode, a block being edited, the page after saving, and any fallback state. Check
 overlays (toolbars, inputs) at the viewport edges too: one overflowed and scrolled the page
-sideways, which no test saw. Look at the block under the mouse as well: CDP leaves the pointer on the
+sideways, which no test saw. Compare
+read mode and edit mode numerically too (`getBoundingClientRect().height` of the same block):
+Chrome forces `white-space: pre-wrap` on plaintext-only hosts, which no stylesheet overrides,
+and a nested list grew from 48px to 120px only in edit mode. Look at the block under the mouse as well: CDP leaves the pointer on the
 last click, so its `:hover` style shows in the screenshot and can hide a selected state.
