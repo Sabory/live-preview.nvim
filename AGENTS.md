@@ -59,6 +59,9 @@ Every feature is checked end to end before it is called done.
   a block, now it splits it. Tests save a block by leaving it (`leave()`), as a click elsewhere
   does, and only press a key to test that key.
 
+- Type what reacts to typing one key at a time (`Input.insertText` per character): a Markdown
+  shortcut fires on the space, so pasting "- " in one go would not prove a typist triggers it.
+
 ### Debugging a flaky or failing step
 
 Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
