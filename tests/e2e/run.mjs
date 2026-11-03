@@ -529,6 +529,44 @@ const tests = {
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
+	async "edit: Cmd+Z undoes and redoes saved edits"({ nvim, browser }) {
+		const file = join(nvim.root, "undo.md");
+		writeFileSync(file, "# U\n\nOne two.\n");
+		const line = () => readLines(file)[2] ?? "";
+		await browser.open("/undo.md");
+		await press(browser, "e");
+
+		await retype(browser, "p", "two", "three");
+		await until(() => line() === "One three.", `the edit: ${line()}`);
+		await received(browser, "One three.");
+		await press(browser, "z", "KeyZ", META);
+		await until(() => line() === "One two.", `Cmd+Z undoes it on disk: ${line()}`);
+		await until(() => browser.js(`document.querySelector("p").textContent === "One two."`), "the page to show the undone text");
+		await press(browser, "z", "KeyZ", META | SHIFT);
+		await until(() => line() === "One three.", `Cmd+Shift+Z redoes it: ${line()}`);
+		await received(browser, "One three.");
+
+		assert(await browser.js(selectIn("p", "One")), "select a word");
+		await press(browser, "b", "KeyB", META);
+		await until(() => line() === "**One** three.", `bold: ${line()}`);
+		await until(() => browser.js(`document.activeElement === document.querySelector("p")`), "the caret back in the block");
+		await press(browser, "z", "KeyZ", META);
+		await until(() => line() === "One three.", `Cmd+Z in a block with nothing unsaved undoes the format: ${line()}`);
+		await received(browser, "\nOne three.");
+
+		await browser.js(caretAt("p", -1));
+		await browser.cdp("Input.insertText", { text: "!!" });
+		await press(browser, "z", "KeyZ", META);
+		await sleep(400);
+		assert(line() === "One three.", `unsaved typing is left to the browser's undo: ${line()}`);
+		await leave(browser);
+		await until(() => line().startsWith("One three."), "leaving saves what is left");
+		await sleep(300);
+		await press(browser, "z", "KeyZ", META | SHIFT);
+		await until(() => browser.js(`document.querySelector(".lp-toast--error")?.textContent.includes("nothing to redo")`), "nothing to redo is reported");
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
 	async "render: front matter, line ranges and alerts"({ browser }) {
 		await browser.open("/a.md");
 		const blocks = await browser.js(`JSON.stringify([...document.querySelector(".markdown-body").children].map((e) => [e.tagName, e.dataset.sourceLine, e.dataset.sourceEnd]))`);

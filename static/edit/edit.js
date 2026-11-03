@@ -791,7 +791,28 @@
 		if (!(next && next.closest && next.closest(HOST) && markdownBody().contains(next))) flushHeldRender();
 	});
 
+	// Cmd+Z undoes the last saved edit, through Neovim's own history; typing a
+	// block has not saved yet is undone by the browser instead.
+	const isUndo = (event) => (event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === "z" || event.key === "y");
+
+	async function undoSaved(redo) {
+		const host = editing && editing.host;
+		editing = null;
+		if (host) host.blur();
+		clearBlocks();
+		hideToolbar();
+		await lastWrite;
+		livepreview_request(redo ? "source.redo" : "source.undo", { path: currentPath() }).catch((error) => toast(error.message));
+	}
+
 	document.addEventListener("keydown", (event) => {
+		const unsaved = editing && editing.host && editing.host.textContent !== editing.before;
+		const inField = event.target.closest && event.target.closest("input, textarea");
+		if (isEditMode() && isUndo(event) && !unsaved && !inField) {
+			event.preventDefault();
+			undoSaved(event.shiftKey || event.key === "y");
+			return;
+		}
 		if (editing && event.target === editing.host) {
 			const kind = (event.metaKey || event.ctrlKey) && SHORTCUTS[event.shiftKey ? event.key.toUpperCase() : event.key];
 			if (kind) {

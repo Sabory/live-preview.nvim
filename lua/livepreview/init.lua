@@ -109,7 +109,7 @@ local function on_message(client, message)
 		})
 	elseif vim.startswith(message.type or "", "comment") then
 		require("livepreview.comments").handle(client, message)
-	elseif message.type == "source.replace" then
+	elseif vim.startswith(message.type or "", "source.") then
 		require("livepreview.source").handle(client, message)
 	end
 end

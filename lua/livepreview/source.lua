@@ -10,16 +10,8 @@ local server = require("livepreview.server")
 ---@field expected string[] the lines the browser saw in that range
 ---@field lines string[] what replaces them
 
----@param message LivePreviewSourceReplace
-local function replace(message)
-	local file = require("livepreview").file_for(message.path)
-	local bufnr = vim.fn.bufadd(file)
-	vim.fn.bufload(bufnr)
-	local first, last = message.start_line - 1, message.end_line
-	if not vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, first, last, true), message.expected) then
-		error("the file changed since the preview rendered it")
-	end
-	vim.api.nvim_buf_set_lines(bufnr, first, last, true, message.lines)
+---@param bufnr integer
+local function save_and_broadcast(bufnr)
 	vim.api.nvim_buf_call(bufnr, function()
 		vim.cmd("silent write")
 	end)
@@ -31,10 +23,54 @@ local function replace(message)
 	})
 end
 
+---@param message LivePreviewSourceReplace
+local function replace(message)
+	local file = require("livepreview").file_for(message.path)
+	local bufnr = vim.fn.bufadd(file)
+	vim.fn.bufload(bufnr)
+	local first, last = message.start_line - 1, message.end_line
+	if not vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, first, last, true), message.expected) then
+		error("the file changed since the preview rendered it")
+	end
+	vim.api.nvim_buf_set_lines(bufnr, first, last, true, message.lines)
+	save_and_broadcast(bufnr)
+end
+
+--- Undo or redo the last change to the file, from the buffer's own history,
+--- so it is the same step `u` takes in Neovim
+---@param command "undo"|"redo"
+local function step(command)
+	---@param message {path: string}
+	return function(message)
+		local bufnr = vim.fn.bufnr(require("livepreview").file_for(message.path))
+		if bufnr < 0 then
+			error("the file is not open in Neovim")
+		end
+		local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+		vim.api.nvim_buf_call(bufnr, function()
+			vim.cmd("silent " .. command)
+		end)
+		if vim.api.nvim_buf_get_changedtick(bufnr) == tick then
+			error("nothing to " .. command)
+		end
+		save_and_broadcast(bufnr)
+	end
+end
+
+local actions = {
+	["source.replace"] = replace,
+	["source.undo"] = step("undo"),
+	["source.redo"] = step("redo"),
+}
+
 ---@param client uv_tcp_t
----@param message LivePreviewSourceReplace|{request_id: integer}
+---@param message {type: string, request_id: integer}
 function M.handle(client, message)
-	local ok, err = pcall(replace, message)
+	local action = actions[message.type]
+	if not action then
+		return
+	end
+	local ok, err = pcall(action, message)
 	server.websocket.send_json(client, {
 		type = "reply",
 		request_id = message.request_id,
