@@ -172,6 +172,11 @@
 		const block = target.expected.join("\n");
 		if (!rendersAs(target, block, state.before)) return { target, conflict: true };
 		if (after === state.before) return { target, block };
+		if ((state.host.tagName === "TD" || state.host.tagName === "TH") && !state.before.trim()) {
+			const [from, to] = scopeOf(state.host, block);
+			const filled = `${block.slice(0, from)} ${after.trim()} ${block.slice(to)}`;
+			if (rendersAs(target, filled, after)) return { target, block: filled };
+		}
 		// A formatter may strip the space after an empty item's marker.
 		if (state.host.tagName === "LI" && !state.before.trim()) {
 			const [marker, ...rest] = block.split("\n");
@@ -457,6 +462,48 @@
 		};
 	}
 
+	// --- Tables -------------------------------------------------------------------
+
+	const emptyRow = (cells) => "|" + " |".repeat(cells);
+
+	// Adds an empty row after `row` (after the delimiter line for the header)
+	// and puts the caret in its `column`.
+	async function addRowAfter(row, column) {
+		const state = editing;
+		editing = null;
+		rowButton.hidden = true;
+		if (state) {
+			state.host.blur();
+			await commit(state);
+		}
+		await lastWrite;
+		const line = parseInt(row.dataset.sourceLine) + (row.parentElement.tagName === "THEAD" ? 1 : 0);
+		const expected = [sourceLine(line)];
+		if (!(await write({ where: { startLine: line, endLine: line }, expected }, [expected[0], emptyRow(row.cells.length)]))) return;
+		flushHeldRender();
+		const cell = markdownBody().querySelector(`tr[data-source-line="${line + 1}"]`)?.cells[column];
+		if (cell) cell.focus();
+	}
+
+	const rowButton = Object.assign(document.createElement("button"), {
+		className: "lp-add-row",
+		textContent: "+ Row",
+		title: "Add a row at the end (Enter adds one below the cell)",
+		hidden: true,
+	});
+	rowButton.addEventListener("mousedown", (event) => event.preventDefault()); // keep the cell's edit
+	rowButton.addEventListener("click", () => {
+		const table = editing && editing.host.closest("table");
+		if (table) addRowAfter(table.rows[table.rows.length - 1], 0);
+	});
+
+	function showRowButton(table) {
+		const rect = table.getBoundingClientRect();
+		rowButton.hidden = false;
+		rowButton.style.top = `${rect.bottom + window.scrollY + 4}px`;
+		rowButton.style.left = `${rect.left + window.scrollX}px`;
+	}
+
 	// --- Formatting a selection --------------------------------------------------
 
 	function selectionIn(host) {
@@ -699,12 +746,14 @@
 		const anchor = host.closest("[data-source-line]");
 		if (!anchor) return;
 		editing = { host, anchor, path: pathFrom(anchor, host), before: host.textContent };
+		if (host.closest("table")) showRowButton(host.closest("table"));
 	});
 
 	document.addEventListener("focusout", (event) => {
 		if (!editing || event.target !== editing.host || toolbar.contains(event.relatedTarget)) return;
 		const state = editing;
 		editing = null;
+		rowButton.hidden = true;
 		if (!selectedBlocks.length) hideToolbar();
 		commit(state);
 		// Re-rendering now would replace the block that is taking the focus.
@@ -723,6 +772,7 @@
 				const host = editing.host;
 				if (editing.pending) onNewBlockEnter(editing);
 				else if (host.tagName === "LI") onItemEnter(host);
+				else if (host.tagName === "TD" || host.tagName === "TH") addRowAfter(host.parentElement, host.cellIndex);
 				else if (host.parentElement === markdownBody() && /^(P|H[1-6])$/.test(host.tagName)) onBlockEnter(host);
 				else host.blur();
 			} else if (event.key === "Tab" && editing.host.tagName === "LI") {
@@ -786,7 +836,7 @@
 		document.querySelector(".lp-topbar") ||
 		document.body.appendChild(Object.assign(document.createElement("div"), { className: "lp-topbar" }));
 	topbar.prepend(toggle);
-	document.body.append(toolbar);
+	document.body.append(toolbar, rowButton);
 	new MutationObserver(markHosts).observe(markdownBody(), { childList: true });
 	setEditMode(false);
 })();

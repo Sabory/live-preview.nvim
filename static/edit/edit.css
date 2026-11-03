@@ -145,3 +145,29 @@
 	color: var(--lp-muted, #656d76);
 	pointer-events: none;
 }
+
+.lp-add-row {
+	position: absolute;
+	z-index: 30;
+	padding: 2px 8px;
+	font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	color: var(--lp-muted, #656d76);
+	background: var(--lp-raised, #f6f8fa);
+	border: 1px solid var(--lp-border, #d0d7de);
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+.lp-add-row[hidden] {
+	display: none;
+}
+
+.lp-add-row:hover {
+	color: var(--lp-fg, #1f2328);
+}
+
+/* Room for the row button under a table, kept in all of edit mode so the page
+   does not jump each time a cell takes the focus. */
+.lp-edit-mode .markdown-body table {
+	margin-bottom: 40px;
+}

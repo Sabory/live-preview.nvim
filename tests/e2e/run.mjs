@@ -470,6 +470,35 @@ const tests = {
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
+	async "edit: add table rows with Enter and the row button"({ nvim, browser }) {
+		const file = join(nvim.root, "table.md");
+		writeFileSync(file, "# T\n\n| Tipo | Monto |\n| ---- | ----- |\n| Normal | 100 |\n\nFin.\n");
+		const source = () => readLines(file).join("\n");
+		const activeCell = (row, column) => browser.js(`document.activeElement === document.querySelectorAll("tr")[${row}]?.cells[${column}]`);
+		await browser.open("/table.md");
+		await press(browser, "e");
+
+		await browser.js(`document.querySelector("tbody td:nth-child(2)").focus()`);
+		assert(await browser.js(`!document.querySelector(".lp-add-row").hidden`), "the row button shows while a cell is edited");
+		await press(browser, "Enter");
+		await until(() => source().includes("\n| Normal | 100 |\n| | |\n\nFin."), `Enter adds a row below: ${source()}`);
+		await until(() => activeCell(2, 1), "the caret in the same column of the new row");
+		await browser.cdp("Input.insertText", { text: "50" });
+		await leave(browser);
+		await until(() => source().includes("\n| | 50 |\n"), `typing fills the empty cell: ${source()}`);
+		await received(browser, "| 50 |");
+
+		await browser.js(`document.querySelector("thead th").focus()`);
+		await press(browser, "Enter");
+		await until(() => source().includes("\n| ---- | ----- |\n| | |\n| Normal"), `Enter in the header adds the first row: ${source()}`);
+		await until(() => activeCell(1, 0), "the caret in the first new row");
+		await browser.cdp("Input.insertText", { text: "Rezago" });
+		await clickOn(browser, ".lp-add-row");
+		await until(() => source().includes("\n| Rezago | |\n| Normal | 100 |\n| | 50 |\n| | |\n\nFin."), `the button adds a row at the end and keeps the typed cell: ${source()}`);
+		await until(() => activeCell(4, 0), "the caret in the last row");
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
 	async "render: front matter, line ranges and alerts"({ browser }) {
 		await browser.open("/a.md");
 		const blocks = await browser.js(`JSON.stringify([...document.querySelector(".markdown-body").children].map((e) => [e.tagName, e.dataset.sourceLine, e.dataset.sourceEnd]))`);
