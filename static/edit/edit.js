@@ -44,7 +44,8 @@
 			if (isEditMode() && outermost && !node.closest(FROZEN)) node.setAttribute("contenteditable", "plaintext-only");
 			else node.removeAttribute("contenteditable");
 		}
-		for (const list of markdownBody().querySelectorAll(NESTED_LIST)) {
+		// A checkbox inside an editable item could not be clicked.
+		for (const list of markdownBody().querySelectorAll(`${NESTED_LIST}, .task-list-item-checkbox`)) {
 			if (isEditMode()) list.setAttribute("contenteditable", "false");
 			else list.removeAttribute("contenteditable");
 		}
@@ -100,6 +101,8 @@
 	// The part of the block's source a host's text comes from: a table cell is
 	// one segment of its row, so a word repeated in another cell is not matched.
 	function scopeOf(host, source) {
+		// An item's text starts after its marker and box, so "[x]" is not matched as text.
+		if (host.tagName === "LI") return [(source.match(ITEM) || [""])[0].length, source.length];
 		if (host.tagName !== "TD" && host.tagName !== "TH") return [0, source.length];
 		const pipes = [...source.matchAll(/(?<!\\)\|/g)].map((m) => m.index);
 		const leading = source.trimStart().startsWith("|") ? 1 : 0;
@@ -128,8 +131,18 @@
 		let j = 0;
 		for (let i = 0; i < rendered.length; i++) {
 			const char = rendered[i];
-			const whitespace = /\s/.test(char);
-			while (j < source.length && !(source[j] === char || (whitespace && /\s/.test(source[j])))) j++;
+			if (/\s/.test(char)) {
+				// Rendered space the source may not have (around a checkbox, at an
+				// edge): it only takes a source space found before the next word.
+				const next = (rendered.slice(i + 1).match(/\S/) || [])[0];
+				let k = j;
+				while (k < source.length && !/\s/.test(source[k]) && source[k] !== next) k++;
+				const found = k < source.length && /\s/.test(source[k]);
+				offsets.push(found ? k : j);
+				if (found) j = k + 1;
+				continue;
+			}
+			while (j < source.length && source[j] !== char) j++;
 			offsets.push(j++);
 		}
 		return offsets;
@@ -508,9 +521,9 @@
 
 	// Typed at the start of a paragraph, a marker and a space turn it into that
 	// block, as Notion does; the marker is not written as text.
-	const SHORTCUT = /^(#{1,3}|[-*]|1\.|>) /;
-	const SHORTCUT_KIND = { "#": "h1", "##": "h2", "###": "h3", "-": "bullet", "*": "bullet", "1.": "numbered", ">": "quote" };
-	const KIND_TAG = { h1: "h1", h2: "h2", h3: "h3", bullet: "li", numbered: "li", quote: "p" };
+	const SHORTCUT = /^(#{1,3}|[-*]|1\.|>|\[\]) /;
+	const SHORTCUT_KIND = { "#": "h1", "##": "h2", "###": "h3", "-": "bullet", "*": "bullet", "1.": "numbered", ">": "quote", "[]": "todo" };
+	const KIND_TAG = { h1: "h1", h2: "h2", h3: "h3", bullet: "li", numbered: "li", todo: "li", quote: "p" };
 
 	function onShortcutTyped(host) {
 		if (host.tagName !== "P" || host.parentElement !== markdownBody()) return;
@@ -532,6 +545,17 @@
 		if (!(await write(target, livepreview_blocks.turnInto(kind, block.split("\n"))))) return;
 		flushHeldRender();
 		focusBlock(KIND_TAG[kind], target.where.startLine, 0);
+	}
+
+	// --- Checklists ---------------------------------------------------------------
+
+	// A click on a checkbox ticks the item in the source, in or out of edit mode.
+	async function toggleTask(box) {
+		const line = parseInt(box.closest("li").dataset.sourceLine);
+		await lastWrite;
+		const expected = [sourceLine(line)];
+		const ticked = expected[0].replace(/\[([ xX])\]/, (_, mark) => (mark === " " ? "[x]" : "[ ]"));
+		write({ where: { startLine: line, endLine: line }, expected }, [ticked]);
 	}
 
 	// --- Formatting a selection --------------------------------------------------
@@ -706,6 +730,7 @@
 		blockButton("h3", "H3", "Heading 3"),
 		blockButton("bullet", "•", "Bulleted list"),
 		blockButton("numbered", "1.", "Numbered list"),
+		blockButton("todo", "☐", "Checklist"),
 		blockButton("quote", "❝", "Quote"),
 		blockButton("text", "¶", "Text"),
 		linkInput,
@@ -875,6 +900,10 @@
 		},
 		true,
 	);
+
+	document.addEventListener("change", (event) => {
+		if (event.target.matches && event.target.matches(".markdown-body .task-list-item-checkbox")) toggleTask(event.target);
+	});
 
 	// A link inside an editable block places the caret instead of navigating.
 	document.addEventListener(

@@ -3,7 +3,8 @@ const livepreview_blocks = (() => {
 	const MARKER = /^(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
 	const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/;
 	const IS = {
-		bullet: /^\s*[-*+]\s/,
+		bullet: /^\s*[-*+]\s(?!\s*\[[ xX]\])/,
+		todo: /^\s*[-*+]\s+\[[ xX]\]\s/,
 		numbered: /^\s*\d+[.)]\s/,
 		h1: /^# /,
 		h2: /^## /,
@@ -38,6 +39,7 @@ const livepreview_blocks = (() => {
 		const target = IS[kind] && allLines(lines, IS[kind]) ? "text" : kind;
 		const items = texts(lines);
 		if (target === "bullet") return items.map((text) => `- ${text}`);
+		if (target === "todo") return items.map((text) => `- [ ] ${text}`);
 		if (target === "numbered") return items.map((text, i) => `${i + 1}. ${text}`);
 		if (/^h[1-3]$/.test(target)) return separated(items.map((text) => `${"#".repeat(target[1])} ${text}`));
 		return separated(items);

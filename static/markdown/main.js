@@ -17,6 +17,10 @@ if (typeof livepreview_alertsPlugin === "function") {
 	md.use(livepreview_alertsPlugin);
 }
 
+if (typeof livepreview_tasksPlugin === "function") {
+	md.use(livepreview_tasksPlugin);
+}
+
 md.use(markdownitEmoji);
 
 // Use markdown-it-katex plugin to handle math rendering during markdown parsing

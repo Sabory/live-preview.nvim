@@ -567,6 +567,49 @@ const tests = {
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
+	async "edit: checklists: render, tick, add, convert"({ nvim, browser }) {
+		const file = join(nvim.root, "tasks.md");
+		writeFileSync(file, "# C\n\n- [ ] buy milk\n- [x] xylophone\n\nplain one\n\nplain two\n");
+		const source = () => readLines(file).join("\n");
+		const boxes = () => browser.js(`[...document.querySelectorAll(".task-list-item-checkbox")].map((box) => box.checked).join(",")`);
+		await browser.open("/tasks.md");
+		assert((await boxes()) === "false,true", `items render as checkboxes: ${await boxes()}`);
+		assert(await browser.js(`document.querySelector("li").textContent.trim() === "buy milk"`), "the box is not text");
+
+		await clickOn(browser, ".task-list-item-checkbox");
+		await until(() => source().includes("\n- [x] buy milk\n"), `a click ticks the item, even out of edit mode: ${source()}`);
+		await received(browser, "- [x] buy milk");
+		await press(browser, "e");
+		await clickOn(browser, ".task-list-item-checkbox");
+		await until(() => source().includes("\n- [ ] buy milk\n"), `and unticks it in edit mode: ${source()}`);
+		await received(browser, "- [ ] buy milk");
+
+		await browser.js(`(() => { const li = document.querySelector("li"); li.focus(); const text = [...li.childNodes].findLast((node) => node.nodeType === 3); const range = document.createRange(); range.setStart(text, text.length); getSelection().removeAllRanges(); getSelection().addRange(range); })()`);
+		await press(browser, "Enter");
+		await until(() => /\n- \[ \] buy milk\n- \[ \] ?\n- \[x\]/.test(source()), `Enter adds an unticked task: ${source()}`);
+		await until(() => browser.js(`document.activeElement.tagName === "LI" && !!document.activeElement.querySelector(".task-list-item-checkbox")`), "the empty task has its box");
+		await browser.cdp("Input.insertText", { text: "eggs" });
+		await leave(browser);
+		await until(() => source().includes("\n- [ ] eggs\n- [x] xylophone\n"), `typing fills the task: ${source()}`);
+		await received(browser, "- [ ] eggs");
+
+		await retype(browser, "li:nth-child(3)", "xylo", "saxo");
+		await until(() => source().includes("\n- [x] saxophone\n"), `a task's text starting with x is not taken for its box: ${source()}`);
+		await received(browser, "saxophone");
+
+		await browser.js(caretAt(".markdown-body > p", 0));
+		for (const key of "[] ") await browser.cdp("Input.insertText", { text: key });
+		await until(() => source().includes("\n- [ ] plain one\n"), `[] makes a task: ${source()}`);
+		await received(browser, "- [ ] plain one");
+
+		assert(await browser.js(selectIn(".markdown-body > p", "plain")), "select in the last paragraph");
+		await nextFrames(browser);
+		await clickOn(browser, '.lp-format [data-block="todo"]');
+		await until(() => source().endsWith("\n- [ ] plain two\n"), `the checklist button: ${source()}`);
+		await received(browser, "- [ ] plain two");
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
 	async "render: front matter, line ranges and alerts"({ browser }) {
 		await browser.open("/a.md");
 		const blocks = await browser.js(`JSON.stringify([...document.querySelector(".markdown-body").children].map((e) => [e.tagName, e.dataset.sourceLine, e.dataset.sourceEnd]))`);
