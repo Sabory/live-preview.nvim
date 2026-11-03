@@ -139,3 +139,9 @@
 .lp-edit-mode .markdown-body [contenteditable="plaintext-only"].lp-block-selected {
 	background: rgba(9, 105, 218, 0.14);
 }
+
+.markdown-body .lp-new:empty::before {
+	content: attr(data-placeholder);
+	color: var(--lp-muted, #656d76);
+	pointer-events: none;
+}

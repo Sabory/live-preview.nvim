@@ -99,10 +99,14 @@ const received = (browser, text) => until(() => browser.js(`livepreview_source.i
 // The format toolbar moves to a new selection on the next animation frame.
 const nextFrames = (browser) => browser.js(`new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))`);
 
+// Leaving a block, as a click elsewhere does, is what saves it: Enter splits
+// a paragraph or adds a block, the way Notion does.
+const leave = (browser) => browser.js(`document.activeElement.blur()`);
+
 async function retype(browser, selector, needle, text) {
 	assert(await browser.js(selectIn(selector, needle)), `"${needle}" in ${selector}`);
 	await browser.cdp("Input.insertText", { text });
-	await press(browser, "Enter");
+	await leave(browser);
 }
 
 // Neovim writes a new file and renames it over the old one, so a read can land in between.
@@ -252,14 +256,14 @@ const tests = {
 		await client.request("source.replace", { path: "/edit.md", start_line: 7, end_line: 7, expected: ["| a b  | a     |"], lines: ["| c    | d     |"] });
 		await sleep(300);
 		assert(await browser.js(`document.querySelector("p").textContent.includes("typed")`), "an update waits while a block is edited");
-		await press(browser, "Enter");
+		await leave(browser);
 		await until(() => line(3).includes("typed") && line(7) === "| c    | d     |", "both edits on disk");
 		await until(() => browser.js(`document.querySelector("tbody td").textContent === "c"`), "the held update renders after the edit");
 
 		assert(await browser.js(selectIn("p", "Plain")), "focus the paragraph again");
 		nvim.lua(`local b = vim.fn.bufadd("${file}"); vim.fn.bufload(b); vim.api.nvim_buf_set_lines(b, 2, 3, true, { "from nvim" }); vim.api.nvim_buf_call(b, function() vim.cmd("silent write") end); return true`);
 		await browser.cdp("Input.insertText", { text: "Stale" });
-		await press(browser, "Enter");
+		await leave(browser);
 		await until(() => browser.js(`document.querySelector(".lp-toast--error")?.textContent.includes("changed")`), "a refused edit is reported");
 		assert(line(3) === "from nvim", `a stale edit writes nothing: ${line(3)}`);
 		client.close();
@@ -421,6 +425,48 @@ const tests = {
 		await browser.cdp("Input.insertText", { text: "" });
 		await browser.js(`document.activeElement.blur()`);
 		await until(() => source().includes("\n- two\n- th\n\n1. first"), `clearing an item deletes it: ${source()}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
+	async "edit: new paragraphs, a list in a new paragraph, and splits"({ nvim, browser }) {
+		const file = join(nvim.root, "para.md");
+		const original = "# Notes\n\nAlpha beta gamma.\n\nLast line.\n";
+		writeFileSync(file, original);
+		const source = () => readLines(file).join("\n");
+		const active = (text) => browser.js(`document.activeElement.textContent === ${JSON.stringify(text)}`);
+		await browser.open("/para.md");
+		await press(browser, "e");
+
+		await browser.js(caretAt(".markdown-body > p", -1));
+		await press(browser, "Enter");
+		await until(() => browser.js(`document.activeElement.classList.contains("lp-new")`), "Enter at the end opens a new block");
+		assert(source() === original, "an empty new block writes nothing");
+		await browser.cdp("Input.insertText", { text: "New paragraph." });
+		await press(browser, "Enter");
+		await until(() => source().includes("\nAlpha beta gamma.\n\nNew paragraph.\n\nLast line."), `the new paragraph: ${source()}`);
+		await until(() => browser.js(`document.activeElement.classList.contains("lp-new") && document.activeElement.textContent === ""`), "Enter opens the next new block");
+
+		await browser.cdp("Input.insertText", { text: "- uno" });
+		await press(browser, "Enter");
+		await until(() => /\nNew paragraph\.\n\n- uno\n- ?\n\nLast line\./.test(source()), `a list typed in a new block continues as items: ${source()}`);
+		await until(() => browser.js(`document.activeElement.tagName === "LI" && document.activeElement.textContent === ""`), "the caret in the next item");
+		await browser.cdp("Input.insertText", { text: "dos" });
+		await browser.js(`document.activeElement.blur()`);
+		await until(() => source().includes("\n- uno\n- dos\n\nLast line."), `the second item: ${source()}`);
+		await received(browser, "- dos");
+
+		await browser.js(caretAt(".markdown-body > p", 6));
+		await press(browser, "Enter");
+		await until(() => source().startsWith("# Notes\n\nAlpha\n\nbeta gamma.\n\nNew paragraph."), `Enter in the middle splits the paragraph: ${source()}`);
+		await until(() => active("beta gamma."), "the caret in the second half");
+		await received(browser, "\nbeta gamma.");
+
+		const before = source();
+		await browser.js(caretAt(".markdown-body > p:last-of-type", -1));
+		await press(browser, "Enter");
+		await browser.js(`document.activeElement.blur()`);
+		await until(() => browser.js(`!document.querySelector(".lp-new")`), "an empty new block goes away");
+		assert(source() === before, `and writes nothing: ${source()}`);
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 

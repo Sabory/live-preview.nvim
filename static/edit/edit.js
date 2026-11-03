@@ -37,7 +37,9 @@
 	// does every list item: its nested lists are made non-editable islands, so
 	// the items in them are hosts of their own.
 	function markHosts() {
+		// A new block (.lp-new) manages its own attribute until the page re-renders.
 		for (const node of markdownBody().querySelectorAll(EDITABLE)) {
+			if (node.classList.contains("lp-new")) continue;
 			const outermost = node.tagName === "LI" || !node.parentElement.closest(EDITABLE);
 			if (isEditMode() && outermost && !node.closest(FROZEN)) node.setAttribute("contenteditable", "plaintext-only");
 			else node.removeAttribute("contenteditable");
@@ -223,6 +225,7 @@
 	// --- Committing a block -----------------------------------------------------
 
 	async function commit(state) {
+		if (state.pending) return commitNew(state);
 		const after = state.host.textContent;
 		if (after === state.before && !isEmptiedItem(state.host, after)) return;
 		await lastWrite;
@@ -297,10 +300,10 @@
 
 	const sourceLine = (line) => livepreview_source.split("\n")[line - 1];
 
-	// Rewrites the edited item's lines, with what was typed in it, then puts the
-	// caret in the item starting at `focus.line`. `change` returns null to leave
-	// the item as it was.
-	async function rewriteItem(change) {
+	// Rewrites the edited block's lines, with what was typed in it, then puts the
+	// caret in the block starting at `focus.line` (a list item unless `focus.tag`
+	// says otherwise). `change` returns null to leave the block as it was.
+	async function rewriteBlock(change) {
 		const state = editing;
 		const text = state.host.textContent;
 		const caret = caretOffset(state.host);
@@ -317,10 +320,14 @@
 		};
 		if (!(await write(target, result.lines))) return;
 		flushHeldRender();
-		const item = markdownBody().querySelector(`li[data-source-line="${result.focus.line}"]`);
-		if (!item) return;
-		item.focus();
-		selectText(item, { start: result.focus.caret, end: result.focus.caret });
+		focusBlock(result.focus.tag || "li", result.focus.line, result.focus.caret);
+	}
+
+	function focusBlock(tag, line, caret) {
+		const block = markdownBody().querySelector(`${tag}[data-source-line="${line}"]`);
+		if (!block) return;
+		block.focus();
+		selectText(block, { start: caret, end: caret });
 	}
 
 	// The last item of a list also spans the blank line after the list.
@@ -353,9 +360,9 @@
 		const own = ownText(item);
 		const caret = caretOffset(item);
 		if (!item.textContent.trim()) return item.blur(); // an empty item is deleted on leaving it
-		if (caret >= own.trimEnd().length) return rewriteItem(addItem);
+		if (caret >= own.trimEnd().length) return rewriteBlock(addItem);
 		if (item.querySelector("ul, ol") || own.includes("\n")) return; // only one-line items split
-		rewriteItem(splitItem);
+		rewriteBlock(splitItem);
 	}
 
 	// Tab nests the item under the one before it; Shift+Tab moves it back out.
@@ -367,10 +374,87 @@
 		const shift = outdent
 			? (line) => line.replace(new RegExp(`^ {0,${width}}`), "")
 			: (line) => (line.trim() ? " ".repeat(width) + line : line);
-		rewriteItem((lines, target, text, caret) => ({
+		rewriteBlock((lines, target, text, caret) => ({
 			lines: lines.map(shift),
 			focus: { line: target.where.startLine, caret },
 		}));
+	}
+
+	// --- Paragraphs ---------------------------------------------------------------
+
+	// Markdown has no empty paragraph, so a new block lives only in the page
+	// until it has text, which is then inserted after `afterLine` as Markdown:
+	// "- " starts a list, "# " a heading.
+	function openNewBlock(after, afterLine) {
+		const block = document.createElement("p");
+		block.className = "lp-new";
+		block.dataset.placeholder = "Type, or start with - 1. > # for a list, quote or heading";
+		block.setAttribute("contenteditable", "plaintext-only");
+		after.after(block);
+		editing = { host: block, pending: { afterLine }, before: "" };
+		block.focus();
+	}
+
+	const insertedLines = (text, next) => ["", text, ...(next && next.trim() ? [""] : [])];
+
+	async function commitNew({ host, pending }) {
+		const text = host.textContent.trim();
+		host.removeAttribute("contenteditable");
+		if (!text) {
+			host.remove();
+			return flushHeldRender();
+		}
+		await lastWrite;
+		const next = livepreview_source.split("\n")[pending.afterLine];
+		const where = { startLine: pending.afterLine + 1, endLine: pending.afterLine };
+		return write({ where, expected: [] }, insertedLines(text, next));
+	}
+
+	// Enter in a new block: its text is written, and the next block is another
+	// new one, or the next item when the text started a list.
+	async function onNewBlockEnter(state) {
+		const text = state.host.textContent.trim();
+		if (!text) return state.host.blur();
+		editing = null;
+		const textLine = state.pending.afterLine + 2;
+		if (!ITEM.test(text)) {
+			commitNew(state);
+			return openNewBlock(state.host, textLine);
+		}
+		await commitNew(state);
+		flushHeldRender();
+		focusBlock("li", textLine, text.length);
+		if (editing) rewriteBlock(addItem);
+	}
+
+	function onBlockEnter(host) {
+		const caret = caretOffset(host);
+		if (caret < host.textContent.trimEnd().length) {
+			if (host.tagName === "P" && caret > 0) rewriteBlock(splitParagraph);
+			return;
+		}
+		const state = editing;
+		editing = null;
+		commit(state);
+		openNewBlock(host, lineRange(state.anchor)[1]);
+	}
+
+	// Splits a paragraph at the caret, unless the cut falls inside markup: the
+	// two halves must render as the text on each side of the caret.
+	function splitParagraph(lines, target, text, caret) {
+		const block = lines.join("\n");
+		const cut = align(text, block)[caret - 1] + 1;
+		const halves = [block.slice(0, cut).trimEnd(), block.slice(cut).trimStart()];
+		const page = document.createElement("div");
+		page.innerHTML = livepreview_toHtml(halves.join("\n\n"));
+		const rendered = [...page.querySelectorAll("p")].map((p) => normalize(p.textContent));
+		const expected = [text.slice(0, caret), text.slice(caret)].map(normalize);
+		if (rendered.join("\n") !== expected.join("\n")) return null;
+		const first = halves[0].split("\n");
+		return {
+			lines: [...first, "", ...halves[1].split("\n")],
+			focus: { tag: "p", line: target.where.startLine + first.length + 1, caret: 0 },
+		};
 	}
 
 	// --- Formatting a selection --------------------------------------------------
@@ -613,6 +697,7 @@
 		const host = event.target.closest && event.target.closest(HOST);
 		if (!host || !markdownBody().contains(host) || (editing && editing.host === host)) return;
 		const anchor = host.closest("[data-source-line]");
+		if (!anchor) return;
 		editing = { host, anchor, path: pathFrom(anchor, host), before: host.textContent };
 	});
 
@@ -635,8 +720,11 @@
 				kind === "link" ? openLinkInput() : format(kind);
 			} else if (event.key === "Enter") {
 				event.preventDefault();
-				if (editing.host.tagName === "LI") onItemEnter(editing.host);
-				else editing.host.blur();
+				const host = editing.host;
+				if (editing.pending) onNewBlockEnter(editing);
+				else if (host.tagName === "LI") onItemEnter(host);
+				else if (host.parentElement === markdownBody() && /^(P|H[1-6])$/.test(host.tagName)) onBlockEnter(host);
+				else host.blur();
 			} else if (event.key === "Tab" && editing.host.tagName === "LI") {
 				event.preventDefault();
 				onItemTab(editing.host, event.shiftKey);
