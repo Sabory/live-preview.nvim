@@ -1,7 +1,7 @@
 // Helpers for the end-to-end tests: a headless Neovim serving the preview and
 // a headless Chromium driven over the DevTools protocol.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,8 +24,11 @@ export async function until(check, what, timeout = 4000) {
 export async function startNvim({ file = "a.md", env = {} } = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "lp-e2e-"));
 	const socket = join(dir, "nvim.sock");
+	// Edits from the preview write to disk, so each Neovim serves its own copy.
+	const root = join(dir, "fixtures");
+	cpSync(join(here, "fixtures"), root, { recursive: true });
 	const nvim = spawn("nvim", ["--headless", "--clean", "--listen", socket, "-u", join(here, "init.lua")], {
-		env: { ...process.env, LP_PORT: PORT, LP_FILE: file, ...env },
+		env: { ...process.env, LP_PORT: PORT, LP_FILE: file, LP_ROOT: root, ...env },
 		stdio: "ignore",
 	});
 	try {
@@ -37,6 +40,7 @@ export async function startNvim({ file = "a.md", env = {} } = {}) {
 	}
 	const remote = (flag, arg) => execFileSync("nvim", ["--server", socket, flag, arg]).toString().trim();
 	return {
+		root,
 		expr: (expression) => remote("--remote-expr", expression),
 		lua: (code) => JSON.parse(remote("--remote-expr", `luaeval('vim.json.encode((function() ${code} end)())')`)),
 		keys: (keys) => remote("--remote-send", keys),

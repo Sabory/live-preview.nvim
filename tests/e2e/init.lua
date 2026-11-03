@@ -1,4 +1,4 @@
--- Neovim side of the end-to-end tests: serves tests/e2e/fixtures with an
+-- Neovim side of the end-to-end tests: serves a copy of tests/e2e/fixtures with an
 -- in-memory comment provider and hunks the tests set through _G.HUNKS.
 local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2))))
 vim.opt.rtp:prepend(root)
@@ -37,6 +37,6 @@ require("livepreview.config").set({
 		return _G.HUNKS
 	end,
 })
-vim.cmd.cd(root .. "/tests/e2e/fixtures")
+vim.cmd.cd(vim.env.LP_ROOT)
 vim.cmd.edit(vim.env.LP_FILE or "a.md")
 vim.cmd("LivePreview start")
