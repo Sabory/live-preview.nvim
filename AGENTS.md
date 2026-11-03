@@ -52,6 +52,13 @@ Every feature is checked end to end before it is called done.
   find what the steps share (here, that blank line) and check every remaining step against it
   before the next run.
 
+- Before the formal runs, walk the whole new flow once in a throwaway script on `lib.mjs` that
+  prints the file and `document.activeElement` after every step. All the broken steps show up
+  in one pass instead of one per run.
+- Changing what a key does breaks the older tests that used it as a shortcut: Enter used to save
+  a block, now it splits it. Tests save a block by leaving it (`leave()`), as a click elsewhere
+  does, and only press a key to test that key.
+
 ### Debugging a flaky or failing step
 
 Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
