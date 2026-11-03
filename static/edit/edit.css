@@ -122,3 +122,20 @@
 ::highlight(lp-link-target) {
 	background-color: rgba(9, 105, 218, 0.3);
 }
+
+.lp-format-separator {
+	width: 1px;
+	margin: 4px 3px;
+	background: var(--lp-border, #d0d7de);
+}
+
+/* Several blocks are selected: only block actions apply. */
+.lp-format--blocks [data-format],
+.lp-format--blocks .lp-format-separator {
+	display: none;
+}
+
+/* Beats the hover background, which a Shift+click leaves on the last block. */
+.lp-edit-mode .markdown-body [contenteditable].lp-block-selected {
+	background: rgba(9, 105, 218, 0.14);
+}

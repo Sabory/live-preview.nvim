@@ -10,6 +10,7 @@
 	const SHORTCUTS = { b: "bold", i: "italic", e: "code", k: "link", S: "strike" };
 
 	let editing = null; // { host, anchor, path, before }
+	let selectedBlocks = []; // hosts picked with Esc and Shift+click
 	// Neovim broadcasts the new source before it replies, so an edit patched
 	// after the previous write settles is patched against what is on disk.
 	let lastWrite = Promise.resolve();
@@ -180,7 +181,7 @@
 		await lastWrite;
 		const { target, block, attempt, conflict } = typedSource(state, after);
 		if (conflict) refuse();
-		else if (block !== undefined) write(target, block);
+		else if (block !== undefined) await write(target, block);
 		else openRaw(target, attempt);
 	}
 
@@ -211,7 +212,7 @@
 	}
 
 	function flushHeldRender() {
-		if (!editing && livepreview_heldText !== null) livepreview_render(livepreview_heldText);
+		if (!livepreview_holdRender() && livepreview_heldText !== null) livepreview_render(livepreview_heldText);
 	}
 
 	// --- Formatting a selection --------------------------------------------------
@@ -296,6 +297,71 @@
 		selectText(host, selection);
 	}
 
+	// --- Turning blocks into other blocks -------------------------------------
+
+	const allHosts = () => [...markdownBody().querySelectorAll("[contenteditable]")];
+
+	const unmark = (host) => host.classList.remove("lp-block-selected");
+
+	function selectBlocks(hosts) {
+		selectedBlocks.forEach(unmark);
+		selectedBlocks = hosts;
+		getSelection().removeAllRanges();
+		hosts.forEach((host) => host.classList.add("lp-block-selected"));
+		const range = document.createRange();
+		range.selectNodeContents(hosts[0]);
+		toolbar.classList.add("lp-format--blocks");
+		showToolbarOver(range);
+	}
+
+	function clearBlocks() {
+		selectedBlocks.forEach(unmark);
+		selectedBlocks = [];
+		toolbar.classList.remove("lp-format--blocks");
+		flushHeldRender();
+	}
+
+	function hostsBetween(a, b) {
+		const hosts = allHosts();
+		const [from, to] = [hosts.indexOf(a), hosts.indexOf(b)].sort((x, y) => x - y);
+		return hosts.slice(from, to + 1);
+	}
+
+	async function turnInto(kind) {
+		const hosts = selectedBlocks.length ? selectedBlocks : editing ? [editing.host] : [];
+		if (!hosts.length) return;
+		const ranges = hosts.map((host) => lineRange(host.closest("[data-source-line]")));
+		const startLine = Math.min(...ranges.map(([start]) => start));
+		const endLine = Math.max(...ranges.map(([, end]) => end));
+		const state = editing;
+		editing = null;
+		clearBlocks();
+		hideToolbar();
+		if (state) {
+			state.host.blur();
+			await commit(state);
+		}
+		await lastWrite;
+		const lines = livepreview_source.split("\n");
+		const expected = lines.slice(startLine - 1, endLine);
+		if (!livepreview_blocks.turnable(expected)) {
+			toast("Tables and code blocks can't be turned into other blocks");
+			return flushHeldRender();
+		}
+		const result = livepreview_blocks.padded(livepreview_blocks.turnInto(kind, expected), lines[startLine - 2], lines[endLine]);
+		await write({ where: { startLine, endLine }, expected }, result.join("\n"));
+	}
+
+	const blockButton = (kind, label, title) => {
+		const button = document.createElement("button");
+		button.dataset.block = kind;
+		button.textContent = label;
+		button.title = title;
+		button.addEventListener("mousedown", (event) => event.preventDefault()); // keep the selection
+		button.addEventListener("click", () => turnInto(kind));
+		return button;
+	};
+
 	const toolbarButton = (kind, label, title) => {
 		const button = document.createElement("button");
 		button.dataset.format = kind;
@@ -315,6 +381,14 @@
 		toolbarButton("strike", "<s>S</s>", "Strikethrough (⌘⇧S)"),
 		toolbarButton("code", "<code>&lt;/&gt;</code>", "Code (⌘E)"),
 		toolbarButton("link", "Link", "Link (⌘K)"),
+		Object.assign(document.createElement("span"), { className: "lp-format-separator" }),
+		blockButton("h1", "H1", "Heading 1"),
+		blockButton("h2", "H2", "Heading 2"),
+		blockButton("h3", "H3", "Heading 3"),
+		blockButton("bullet", "•", "Bulleted list"),
+		blockButton("numbered", "1.", "Numbered list"),
+		blockButton("quote", "❝", "Quote"),
+		blockButton("text", "¶", "Text"),
 		linkInput,
 	);
 
@@ -333,7 +407,7 @@
 	}
 
 	function placeToolbar() {
-		if (!linkInput.hidden) return;
+		if (!linkInput.hidden || selectedBlocks.length) return;
 		const selection = editing && editing.host && selectionIn(editing.host);
 		if (!selection) return hideToolbar();
 		showToolbarOver(getSelection().getRangeAt(0));
@@ -388,7 +462,7 @@
 		if (!editing || event.target !== editing.host || toolbar.contains(event.relatedTarget)) return;
 		const state = editing;
 		editing = null;
-		hideToolbar();
+		if (!selectedBlocks.length) hideToolbar();
 		commit(state);
 		// Re-rendering now would replace the block that is taking the focus.
 		const next = event.relatedTarget;
@@ -401,10 +475,22 @@
 			if (kind) {
 				event.preventDefault();
 				kind === "link" ? openLinkInput() : format(kind);
-			} else if (event.key === "Enter" || event.key === "Escape") {
+			} else if (event.key === "Enter") {
 				event.preventDefault();
 				editing.host.blur();
+			} else if (event.key === "Escape") {
+				// Like Notion: Esc leaves the text and selects its block.
+				event.preventDefault();
+				const host = editing.host;
+				selectBlocks([host]);
+				host.blur();
 			}
+			return;
+		}
+		if (selectedBlocks.length && event.key === "Escape") {
+			event.preventDefault();
+			clearBlocks();
+			hideToolbar();
 			return;
 		}
 		const typing = event.target.closest && event.target.closest("input, textarea, [contenteditable]");
@@ -417,6 +503,25 @@
 
 	document.addEventListener("selectionchange", () => requestAnimationFrame(placeToolbar));
 
+	// Shift+click extends the block selection from the block being edited or selected.
+	document.addEventListener(
+		"mousedown",
+		(event) => {
+			if (!isEditMode() || toolbar.contains(event.target)) return;
+			const host = event.target.closest && event.target.closest("[contenteditable]");
+			const from = editing ? editing.host : selectedBlocks[0];
+			if (event.shiftKey && host && from && markdownBody().contains(host) && host !== from) {
+				event.preventDefault();
+				selectBlocks(hostsBetween(from, host));
+				if (editing) editing.host.blur();
+			} else if (selectedBlocks.length) {
+				clearBlocks();
+				hideToolbar();
+			}
+		},
+		true,
+	);
+
 	// A link inside an editable block places the caret instead of navigating.
 	document.addEventListener(
 		"click",
@@ -426,7 +531,7 @@
 		true,
 	);
 
-	livepreview_holdRender = () => editing !== null;
+	livepreview_holdRender = () => editing !== null || selectedBlocks.length > 0;
 	const topbar =
 		document.querySelector(".lp-topbar") ||
 		document.body.appendChild(Object.assign(document.createElement("div"), { className: "lp-topbar" }));

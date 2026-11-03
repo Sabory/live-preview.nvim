@@ -72,7 +72,7 @@ M.md2html = function(md)
 			.. [[<link rel="stylesheet" href="/live-preview.nvim/static/tree/tree.css"><script defer src="/live-preview.nvim/static/tree/tree.js"></script>]]
 	end
 	page_scripts = page_scripts
-		.. [[<link rel="stylesheet" href="/live-preview.nvim/static/edit/edit.css"><script defer src="/live-preview.nvim/static/edit/edit.js"></script>]]
+		.. [[<link rel="stylesheet" href="/live-preview.nvim/static/edit/edit.css"><script defer src="/live-preview.nvim/static/edit/blocks.js"></script><script defer src="/live-preview.nvim/static/edit/edit.js"></script>]]
 	return html_template(html_escape(md), stylesheet, script, page_scripts)
 end
 

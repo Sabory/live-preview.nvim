@@ -21,11 +21,24 @@ Plain **bold** paragraph with a [link](other.md) inside.
 | a b  | a     |
 `;
 
+const BLOCKS_FIXTURE = `# Blocks
+
+First paragraph.
+
+Second paragraph.
+
+Third paragraph.
+
+| A | B |
+| - | - |
+| 1 | 2 |
+`;
+
 // Clicks like a user: the event goes through the page's own handlers.
-async function clickOn(browser, selector) {
+async function clickOn(browser, selector, modifiers = 0) {
 	const [x, y] = await browser.js(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
 	for (const type of ["mousePressed", "mouseReleased"]) {
-		await browser.cdp("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+		await browser.cdp("Input.dispatchMouseEvent", { type, x, y, modifiers, button: "left", clickCount: 1 });
 	}
 }
 
@@ -278,6 +291,63 @@ const tests = {
 		assert(await browser.js(selectIn("tbody td", "uno")), "select a typed word");
 		await press(browser, "b", "KeyB", META);
 		await until(() => line(7) === "| **uno** dos  | a     |", `typed text and its format in one write: ${line(7)}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
+	async "edit: turn blocks into quotes, lists and headings"({ nvim, browser }) {
+		const file = join(nvim.root, "blocks.md");
+		writeFileSync(file, BLOCKS_FIXTURE);
+		const source = () => readLines(file).join("\n");
+		const paragraph = (n) => `.markdown-body > p:nth-of-type(${n})`;
+		const turn = async (kind) => {
+			await nextFrames(browser);
+			await clickOn(browser, `.lp-format [data-block="${kind}"]`);
+		};
+		await browser.open("/blocks.md");
+		await press(browser, "e");
+
+		assert(await browser.js(selectIn(paragraph(1), "First")), "select in the first paragraph");
+		await turn("quote");
+		await until(() => source().includes("\n> First paragraph.\n"), `a quote: ${source()}`);
+		await received(browser, "> First");
+		assert(await browser.js(selectIn("blockquote p", "First")), "select in the quote");
+		await turn("quote");
+		await until(() => source() === BLOCKS_FIXTURE, `the quote toggles off: ${source()}`);
+		await until(() => browser.js(`!livepreview_source.includes("> First")`), "the page to receive the unquoted text");
+
+		assert(await browser.js(selectIn(paragraph(2), "Second")), "select in the second paragraph");
+		await turn("h2");
+		await until(() => source().includes("\n## Second paragraph.\n"), `a heading: ${source()}`);
+		await received(browser, "## Second");
+		assert(await browser.js(selectIn("h2", "Second")), "select in the heading");
+		await turn("h2");
+		await until(() => source() === BLOCKS_FIXTURE, `the heading toggles off: ${source()}`);
+		await until(() => browser.js(`!livepreview_source.includes("## Second")`), "the page to receive the plain text");
+
+		assert(await browser.js(selectIn(paragraph(1), "First")), "focus the first paragraph");
+		await press(browser, "Escape");
+		await until(() => browser.js(`document.querySelectorAll(".lp-block-selected").length === 1`), "Esc to select the block");
+		await clickOn(browser, paragraph(3), SHIFT);
+		await until(() => browser.js(`document.querySelectorAll(".lp-block-selected").length === 3`), "Shift+click to extend the selection");
+		assert(await browser.js(`document.querySelector(".lp-format").classList.contains("lp-format--blocks")`), "only block actions for several blocks");
+		await turn("bullet");
+		await until(() => source().includes("\n- First paragraph.\n- Second paragraph.\n- Third paragraph.\n\n| A"), `paragraphs into one list: ${source()}`);
+		await received(browser, "- Third");
+
+		assert(await browser.js(selectIn("li", "First")), "focus the first item");
+		await press(browser, "Escape");
+		await clickOn(browser, "li:last-child", SHIFT);
+		await until(() => browser.js(`document.querySelectorAll(".lp-block-selected").length === 3`), "the three items");
+		await turn("numbered");
+		await until(() => source().includes("\n1. First paragraph.\n2. Second paragraph.\n3. Third paragraph.\n"), `a numbered list: ${source()}`);
+		await received(browser, "3. Third");
+
+		assert(await browser.js(selectIn("li:last-child", "Third")), "focus the last item");
+		await press(browser, "Escape");
+		await clickOn(browser, "tbody td", SHIFT);
+		await turn("quote");
+		await until(() => browser.js(`document.querySelector(".lp-toast--error")?.textContent.includes("Tables")`), "a table is refused");
+		assert(source().includes("\n3. Third paragraph.\n\n| A | B |"), `nothing written: ${source()}`);
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
