@@ -62,12 +62,20 @@ Every feature is checked end to end before it is called done.
 - Type what reacts to typing one key at a time (`Input.insertText` per character): a Markdown
   shortcut fires on the space, so pasting "- " in one go would not prove a typist triggers it.
 
+- Controls inside an editable block (a task's checkbox) cannot be clicked unless they are
+  `contenteditable="false"`; click them for real (`clickOn()`) in read mode and in edit mode.
+
 ### Debugging a flaky or failing step
 
 Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
 `focusout` (with `relatedTarget`) and re-renders of `.markdown-body` (a `MutationObserver`) with
 timestamps from inside the page. Every timing bug so far showed up as an unexpected render
 between two focus events.
+
+The walkthrough script can be the bug. Before changing the editor for a step that fails there,
+check the script selected what it meant to: a loose list (items separated by blank lines) wraps
+each item's text in a `<p>`, so a search among the item's direct children finds nothing and the
+typing lands at the start.
 
 ### Visual QA
 
