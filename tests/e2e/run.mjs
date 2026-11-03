@@ -34,6 +34,29 @@ Third paragraph.
 | 1 | 2 |
 `;
 
+const LIST_FIXTURE = `# List
+
+- one
+- two
+
+1. first
+
+Para after.
+`;
+
+// Focuses an editable block and puts the caret `offset` characters into its
+// first text, or at its end with -1.
+const caretAt = (selector, offset) => `(() => {
+	const host = document.querySelector(${JSON.stringify(selector)});
+	host.focus();
+	const text = document.createTreeWalker(host, NodeFilter.SHOW_TEXT).nextNode();
+	const range = document.createRange();
+	range.setStart(text, ${offset} < 0 ? text.length : ${offset});
+	getSelection().removeAllRanges();
+	getSelection().addRange(range);
+	return true;
+})()`;
+
 // Clicks like a user: the event goes through the page's own handlers.
 async function clickOn(browser, selector, modifiers = 0) {
 	const [x, y] = await browser.js(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
@@ -44,9 +67,10 @@ async function clickOn(browser, selector, modifiers = 0) {
 
 const META = 4;
 const SHIFT = 8;
+const KEY_CODES = { Enter: 13, Tab: 9 };
 const press = async (browser, key, code = key, modifiers = 0) => {
 	for (const type of ["keyDown", "keyUp"]) {
-		await browser.cdp("Input.dispatchKeyEvent", { type, key, code, modifiers, windowsVirtualKeyCode: key === "Enter" ? 13 : 0 });
+		await browser.cdp("Input.dispatchKeyEvent", { type, key, code, modifiers, windowsVirtualKeyCode: KEY_CODES[key] || 0 });
 	}
 };
 
@@ -348,6 +372,55 @@ const tests = {
 		await turn("quote");
 		await until(() => browser.js(`document.querySelector(".lp-toast--error")?.textContent.includes("Tables")`), "a table is refused");
 		assert(source().includes("\n3. Third paragraph.\n\n| A | B |"), `nothing written: ${source()}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
+	async "edit: add, split, nest and delete list items"({ nvim, browser }) {
+		const file = join(nvim.root, "list.md");
+		writeFileSync(file, LIST_FIXTURE);
+		const source = () => readLines(file).join("\n");
+		const focusedItem = (text) => browser.js(`document.activeElement.tagName === "LI" && document.activeElement.textContent === ${JSON.stringify(text)}`);
+		await browser.open("/list.md");
+		await press(browser, "e");
+
+		await browser.js(caretAt(".markdown-body > ul > li:nth-child(2)", -1));
+		await press(browser, "Enter");
+		await until(() => /\n- two\n- ?\n/.test(source()), `Enter at the end adds an item: ${source()}`);
+		await until(() => focusedItem(""), "the caret in the new item");
+		await browser.cdp("Input.insertText", { text: "three" });
+		await press(browser, "Enter");
+		await until(() => /\n- three\n- ?\n/.test(source()), `typing fills it, Enter adds the next: ${source()}`);
+		await until(() => focusedItem(""), "the caret in the next item");
+		await press(browser, "Enter");
+		await until(() => source() === LIST_FIXTURE.replace("- two\n", "- two\n- three\n"), `Enter on an empty item deletes it: ${source()}`);
+		await received(browser, "- three\n\n");
+
+		await browser.js(caretAt("ol > li", -1));
+		await press(browser, "Enter");
+		await until(() => /\n1\. first\n2\. ?\n/.test(source()), `a numbered item continues the count: ${source()}`);
+		await until(() => focusedItem(""), "the caret in the numbered item");
+		await browser.cdp("Input.insertText", { text: "second" });
+		await browser.js(`document.activeElement.blur()`);
+		await until(() => source().includes("\n1. first\n2. second\n"), `the numbered item is written: ${source()}`);
+		await received(browser, "2. second");
+
+		await browser.js(caretAt(".markdown-body > ul > li:nth-child(2)", -1));
+		await press(browser, "Tab");
+		await until(() => source().includes("\n- one\n  - two\n- three\n"), `Tab nests the item: ${source()}`);
+		await until(() => focusedItem("two"), "the caret stays in the nested item");
+		await press(browser, "Tab", "Tab", SHIFT);
+		await until(() => source().includes("\n- one\n- two\n- three\n"), `Shift+Tab moves it back: ${source()}`);
+		await until(() => focusedItem("two"), "the caret stays in the item");
+
+		await browser.js(caretAt(".markdown-body > ul > li:nth-child(3)", 2));
+		await press(browser, "Enter");
+		await until(() => source().includes("\n- th\n- ree\n"), `Enter in the middle splits the item: ${source()}`);
+		await until(() => focusedItem("ree"), "the caret in the second half");
+
+		assert(await browser.js(selectIn(".markdown-body > ul > li:nth-child(4)", "ree")), "select the item's text");
+		await browser.cdp("Input.insertText", { text: "" });
+		await browser.js(`document.activeElement.blur()`);
+		await until(() => source().includes("\n- two\n- th\n\n1. first"), `clearing an item deletes it: ${source()}`);
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 

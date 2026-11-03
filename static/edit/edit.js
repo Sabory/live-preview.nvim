@@ -6,6 +6,9 @@
 		'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
 	const EDITABLE = "p, h1, h2, h3, h4, h5, h6, li, th, td";
 	const FROZEN = "pre, .katex, .mermaid";
+	const HOST = '[contenteditable="plaintext-only"]';
+	const NESTED_LIST = "li > ul, li > ol";
+	const ITEM = /^(\s*)([-*+]|(\d+)([.)]))(\s+)(\[[ xX]\]\s+)?/;
 	const MARKS = { bold: "**", italic: "*", strike: "~~", code: "`" };
 	const SHORTCUTS = { b: "bold", i: "italic", e: "code", k: "link", S: "strike" };
 
@@ -30,13 +33,36 @@
 
 	// --- Edit mode ----------------------------------------------------------
 
-	// Only the outermost editable element of a block becomes an editing host,
-	// so a list item edits its nested text together.
+	// The outermost editable element of a block becomes an editing host, and so
+	// does every list item: its nested lists are made non-editable islands, so
+	// the items in them are hosts of their own.
 	function markHosts() {
 		for (const node of markdownBody().querySelectorAll(EDITABLE)) {
-			const host = isEditMode() && !node.closest(FROZEN) && !node.parentElement.closest(EDITABLE);
-			if (host) node.setAttribute("contenteditable", "plaintext-only");
+			const outermost = node.tagName === "LI" || !node.parentElement.closest(EDITABLE);
+			if (isEditMode() && outermost && !node.closest(FROZEN)) node.setAttribute("contenteditable", "plaintext-only");
 			else node.removeAttribute("contenteditable");
+		}
+		for (const list of markdownBody().querySelectorAll(NESTED_LIST)) {
+			if (isEditMode()) list.setAttribute("contenteditable", "false");
+			else list.removeAttribute("contenteditable");
+		}
+		if (isEditMode()) markdownBody().querySelectorAll(HOST).forEach(collapseLineBreaks);
+	}
+
+	const isList = (node) => node && (node.nodeName === "UL" || node.nodeName === "OL");
+
+	// WHY: Chrome forces `white-space: pre-wrap` on plaintext-only hosts, and no
+	// stylesheet overrides it, so the line breaks of the HTML and of soft-wrapped
+	// source lines would show as empty lines. Their text keeps the same words.
+	function collapseLineBreaks(host) {
+		const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+		const texts = [];
+		for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+		for (const text of texts) {
+			if (text.parentElement.closest(FROZEN) || !text.nodeValue.includes("\n")) continue;
+			const besideList = isList(text.parentNode) || isList(text.previousSibling) || isList(text.nextSibling);
+			if (besideList && !text.nodeValue.trim()) text.remove();
+			else text.nodeValue = text.nodeValue.replace(/\n/g, " ");
 		}
 	}
 
@@ -144,6 +170,12 @@
 		const block = target.expected.join("\n");
 		if (!rendersAs(target, block, state.before)) return { target, conflict: true };
 		if (after === state.before) return { target, block };
+		// A formatter may strip the space after an empty item's marker.
+		if (state.host.tagName === "LI" && !state.before.trim()) {
+			const [marker, ...rest] = block.split("\n");
+			const filled = [`${marker.trimEnd()} ${after.trim()}`, ...rest].join("\n");
+			if (rendersAs(target, filled, after)) return { target, block: filled };
+		}
 		const [from, to] = scopeOf(state.host, block);
 		const scoped = patch(block.slice(from, to), state.before, changedSpan(state.before, after));
 		for (const candidate of [scoped, withoutEmptyMarkup(scoped)]) {
@@ -153,16 +185,31 @@
 		return { target, attempt: block.slice(0, from) + scoped + block.slice(to) };
 	}
 
+	// A page still waiting to re-render keeps the line numbers from before a
+	// write that added or removed lines; move the blocks after it along.
+	function shiftLines(startLine, endLine, delta) {
+		if (!delta || livepreview_heldText === null) return;
+		for (const block of markdownBody().querySelectorAll("[data-source-line]")) {
+			const [start, end] = lineRange(block);
+			if (start > endLine) block.dataset.sourceLine = start + delta;
+			if (start > endLine || (start < startLine && end >= endLine)) block.dataset.sourceEnd = end + delta;
+		}
+	}
+
 	function write(target, block) {
 		const { startLine, endLine } = target.where;
+		const lines = Array.isArray(block) ? block : block.split("\n");
 		const request = () => livepreview_request("source.replace", {
 			path: currentPath(),
 			start_line: startLine,
 			end_line: endLine,
 			expected: target.expected,
-			lines: block.split("\n"),
+			lines,
 		}).then(
-			() => true,
+			() => {
+				shiftLines(startLine, endLine, lines.length - target.expected.length);
+				return true;
+			},
 			(error) => {
 				toast(error.message);
 				livepreview_render(livepreview_source);
@@ -177,13 +224,17 @@
 
 	async function commit(state) {
 		const after = state.host.textContent;
-		if (after === state.before) return;
+		if (after === state.before && !isEmptiedItem(state.host, after)) return;
 		await lastWrite;
 		const { target, block, attempt, conflict } = typedSource(state, after);
 		if (conflict) refuse();
+		else if (isEmptiedItem(state.host, after)) await write(target, target.expected.slice(lastFilled(target.expected) + 1));
 		else if (block !== undefined) await write(target, block);
 		else openRaw(target, attempt);
 	}
+
+	// Clearing an item's text deletes the item, as Notion does.
+	const isEmptiedItem = (host, text) => host.tagName === "LI" && !text.trim() && !host.querySelector("ul, ol");
 
 	function refuse() {
 		toast("This block changed in Neovim; your edit was not saved");
@@ -213,6 +264,113 @@
 
 	function flushHeldRender() {
 		if (!livepreview_holdRender() && livepreview_heldText !== null) livepreview_render(livepreview_heldText);
+	}
+
+	// --- Lists -----------------------------------------------------------------
+
+	function caretOffset(host) {
+		const selection = getSelection();
+		if (!selection.rangeCount) return 0;
+		const range = document.createRange();
+		range.setStart(host, 0);
+		range.setEnd(selection.focusNode, selection.focusOffset);
+		return range.toString().length;
+	}
+
+	// An item's own text, without the nested lists after it.
+	const ownText = (item) =>
+		[...item.childNodes]
+			.filter((node) => node.nodeName !== "UL" && node.nodeName !== "OL")
+			.map((node) => node.textContent)
+			.join("");
+
+	const markerWidth = (line) => {
+		const match = line.match(ITEM);
+		return match ? match[2].length + match[5].length : 0;
+	};
+
+	// The marker of the item after `line`: the next number, an unchecked box.
+	function nextMarker(line) {
+		const [, indent, bullet, number, dot, space, box] = line.match(ITEM);
+		return `${indent}${number ? `${Number(number) + 1}${dot}` : bullet}${space}${box ? "[ ] " : ""}`;
+	}
+
+	const sourceLine = (line) => livepreview_source.split("\n")[line - 1];
+
+	// Rewrites the edited item's lines, with what was typed in it, then puts the
+	// caret in the item starting at `focus.line`. `change` returns null to leave
+	// the item as it was.
+	async function rewriteItem(change) {
+		const state = editing;
+		const text = state.host.textContent;
+		const caret = caretOffset(state.host);
+		editing = null;
+		hideToolbar();
+		state.host.blur();
+		await lastWrite;
+		const { target, block, attempt, conflict } = typedSource(state, text);
+		if (conflict) return refuse();
+		if (block === undefined) return openRaw(target, attempt);
+		const result = change(block.split("\n"), target, text, caret) || {
+			lines: block.split("\n"),
+			focus: { line: target.where.startLine, caret },
+		};
+		if (!(await write(target, result.lines))) return;
+		flushHeldRender();
+		const item = markdownBody().querySelector(`li[data-source-line="${result.focus.line}"]`);
+		if (!item) return;
+		item.focus();
+		selectText(item, { start: result.focus.caret, end: result.focus.caret });
+	}
+
+	// The last item of a list also spans the blank line after the list.
+	const lastFilled = (lines) => lines.findLastIndex((line) => line.trim());
+
+	function addItem(lines, target) {
+		const at = lastFilled(lines) + 1;
+		return {
+			lines: [...lines.slice(0, at), nextMarker(lines[0]), ...lines.slice(at)],
+			focus: { line: target.where.startLine + at, caret: 0 },
+		};
+	}
+
+	// Splits a one-line item at the caret, unless the cut falls inside markup:
+	// the two halves must render as the text on each side of the caret.
+	function splitItem([line, ...rest], target, text, caret) {
+		if (rest.some((other) => other.trim())) return null;
+		const match = line.match(ITEM);
+		const cut = caret ? align(text, line)[caret - 1] + 1 : match[0].length;
+		const halves = [line.slice(0, cut).trimEnd(), nextMarker(line) + line.slice(cut).trimStart()];
+		const page = document.createElement("div");
+		page.innerHTML = livepreview_toHtml(halves.join("\n"));
+		const rendered = [...page.querySelectorAll("li")].map((li) => normalize(li.textContent));
+		const expected = [text.slice(0, caret), text.slice(caret)].map(normalize);
+		if (rendered.join("\n") !== expected.join("\n")) return null;
+		return { lines: [...halves, ...rest], focus: { line: target.where.startLine + 1, caret: 0 } };
+	}
+
+	function onItemEnter(item) {
+		const own = ownText(item);
+		const caret = caretOffset(item);
+		if (!item.textContent.trim()) return item.blur(); // an empty item is deleted on leaving it
+		if (caret >= own.trimEnd().length) return rewriteItem(addItem);
+		if (item.querySelector("ul, ol") || own.includes("\n")) return; // only one-line items split
+		rewriteItem(splitItem);
+	}
+
+	// Tab nests the item under the one before it; Shift+Tab moves it back out.
+	function onItemTab(item, outdent) {
+		const parent = item.parentElement.closest("li");
+		const reference = outdent ? parent : item.previousElementSibling;
+		if (!reference || reference.tagName !== "LI") return;
+		const width = markerWidth(sourceLine(parseInt(reference.dataset.sourceLine)));
+		const shift = outdent
+			? (line) => line.replace(new RegExp(`^ {0,${width}}`), "")
+			: (line) => (line.trim() ? " ".repeat(width) + line : line);
+		rewriteItem((lines, target, text, caret) => ({
+			lines: lines.map(shift),
+			focus: { line: target.where.startLine, caret },
+		}));
 	}
 
 	// --- Formatting a selection --------------------------------------------------
@@ -299,7 +457,7 @@
 
 	// --- Turning blocks into other blocks -------------------------------------
 
-	const allHosts = () => [...markdownBody().querySelectorAll("[contenteditable]")];
+	const allHosts = () => [...markdownBody().querySelectorAll(HOST)];
 
 	const unmark = (host) => host.classList.remove("lp-block-selected");
 
@@ -452,7 +610,7 @@
 	// --- Wiring -------------------------------------------------------------
 
 	document.addEventListener("focusin", (event) => {
-		const host = event.target.closest && event.target.closest("[contenteditable]");
+		const host = event.target.closest && event.target.closest(HOST);
 		if (!host || !markdownBody().contains(host) || (editing && editing.host === host)) return;
 		const anchor = host.closest("[data-source-line]");
 		editing = { host, anchor, path: pathFrom(anchor, host), before: host.textContent };
@@ -466,7 +624,7 @@
 		commit(state);
 		// Re-rendering now would replace the block that is taking the focus.
 		const next = event.relatedTarget;
-		if (!(next && next.closest && next.closest("[contenteditable]") && markdownBody().contains(next))) flushHeldRender();
+		if (!(next && next.closest && next.closest(HOST) && markdownBody().contains(next))) flushHeldRender();
 	});
 
 	document.addEventListener("keydown", (event) => {
@@ -477,7 +635,11 @@
 				kind === "link" ? openLinkInput() : format(kind);
 			} else if (event.key === "Enter") {
 				event.preventDefault();
-				editing.host.blur();
+				if (editing.host.tagName === "LI") onItemEnter(editing.host);
+				else editing.host.blur();
+			} else if (event.key === "Tab" && editing.host.tagName === "LI") {
+				event.preventDefault();
+				onItemTab(editing.host, event.shiftKey);
 			} else if (event.key === "Escape") {
 				// Like Notion: Esc leaves the text and selects its block.
 				event.preventDefault();
@@ -508,7 +670,7 @@
 		"mousedown",
 		(event) => {
 			if (!isEditMode() || toolbar.contains(event.target)) return;
-			const host = event.target.closest && event.target.closest("[contenteditable]");
+			const host = event.target.closest && event.target.closest(HOST);
 			const from = editing ? editing.host : selectedBlocks[0];
 			if (event.shiftKey && host && from && markdownBody().contains(host) && host !== from) {
 				event.preventDefault();
