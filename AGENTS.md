@@ -39,6 +39,12 @@ Every feature is checked end to end before it is called done.
   another: both hit a write or re-render still in flight, which is where the bugs were.
 - Run a suite twice before calling it green: timing bugs (renders, writes) pass once by luck.
 
+- Keep source transforms pure (`static/edit/blocks.js`: lines in, lines out) and check their
+  cases in node before the e2e, by evaluating the file and calling the global it defines. A
+  wrong transform is cheaper to find there than through a browser.
+- A `received()` wait on text the source already had before the edit passes at once. To wait for
+  a removal (a marker toggled off), wait until the old text is gone instead.
+
 ### Debugging a flaky or failing step
 
 Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
@@ -53,4 +59,5 @@ screenshots with the same helpers (`startNvim`, `startBrowser`, `browser.screens
 realistic document, set the viewport with `Emulation.setDeviceMetricsOverride`, and look at
 them: read mode, a block being edited, the page after saving, and any fallback state. Check
 overlays (toolbars, inputs) at the viewport edges too: one overflowed and scrolled the page
-sideways, which no test saw.
+sideways, which no test saw. Look at the block under the mouse as well: CDP leaves the pointer on the
+last click, so its `:hover` style shows in the screenshot and can hide a selected state.
