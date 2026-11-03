@@ -98,6 +98,8 @@ export async function startBrowser() {
 			cdp.send(JSON.stringify({ id, method, params }));
 		});
 	await call("Runtime.enable");
+	// A headless page never has the system focus, so focus() would fire no focus events.
+	await call("Emulation.setFocusEmulationEnabled", { enabled: true });
 	// A navigating page never answers, so give up on an evaluation after a second.
 	const js = async (expression) => {
 		const reply = await Promise.race([
