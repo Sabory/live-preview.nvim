@@ -1,5 +1,5 @@
 // End-to-end tests: `make e2e`, or `node tests/e2e/run.mjs [name filter]`.
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assert, sleep, startBrowser, startNvim, until, ORIGIN } from "./lib.mjs";
 
@@ -11,6 +11,60 @@ const selectAndComment = (selector, from, to) => `(() => {
 	getSelection().removeAllRanges();
 	getSelection().addRange(range);
 })()`;
+
+const EDIT_FIXTURE = `# Heading
+
+Plain **bold** paragraph with a [link](other.md) inside.
+
+| Name | Value |
+| ---- | ----- |
+| a b  | a     |
+`;
+
+// Clicks like a user: the event goes through the page's own handlers.
+async function clickOn(browser, selector) {
+	const [x, y] = await browser.js(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+	for (const type of ["mousePressed", "mouseReleased"]) {
+		await browser.cdp("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+	}
+}
+
+const press = async (browser, key, code = key) => {
+	for (const type of ["keyDown", "keyUp"]) await browser.cdp("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: key === "Enter" ? 13 : 0 });
+};
+
+// Focuses the editable block and selects `needle` in it, as a double click would.
+const selectIn = (selector, needle) => `(() => {
+	const host = document.querySelector(${JSON.stringify(selector)});
+	host.focus();
+	const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+	for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+		const at = node.nodeValue.indexOf(${JSON.stringify(needle)});
+		if (at < 0) continue;
+		const range = document.createRange();
+		range.setStart(node, at);
+		range.setEnd(node, at + ${needle.length});
+		getSelection().removeAllRanges();
+		getSelection().addRange(range);
+		return true;
+	}
+	return false;
+})()`;
+
+async function retype(browser, selector, needle, text) {
+	assert(await browser.js(selectIn(selector, needle)), `"${needle}" in ${selector}`);
+	await browser.cdp("Input.insertText", { text });
+	await press(browser, "Enter");
+}
+
+// Neovim writes a new file and renames it over the old one, so a read can land in between.
+function readLines(file) {
+	try {
+		return readFileSync(file, "utf8").split("\n");
+	} catch {
+		return [];
+	}
+}
 
 function socketClient() {
 	const socket = new WebSocket(ORIGIN.replace("http", "ws"));
@@ -92,6 +146,69 @@ const tests = {
 
 		const hidden = await client.request("source.replace", { path: "/other.md", start_line: 1, end_line: 0, expected: [], lines: ["top"] });
 		assert(!hidden.error && readFileSync(join(nvim.root, "other.md"), "utf8").startsWith("top\n"), `a file not open in Neovim: ${hidden.error}`);
+		client.close();
+	},
+
+	async "edit: reword a paragraph, a header and a table cell"({ nvim, browser }) {
+		const file = join(nvim.root, "edit.md");
+		writeFileSync(file, EDIT_FIXTURE);
+		const line = (n) => readLines(file)[n - 1];
+		await browser.open("/edit.md");
+		await clickOn(browser, ".lp-edit-toggle");
+		assert(await browser.js(`document.querySelector("p").getAttribute("contenteditable") === "plaintext-only"`), "the pencil makes blocks editable");
+
+		await retype(browser, "p", "paragraph", "sentence");
+		await until(() => line(3) === "Plain **bold** sentence with a [link](other.md) inside.", `a reworded paragraph: ${line(3)}`);
+		await until(() => browser.js(`document.querySelector("p").textContent.includes("sentence")`), "the page to re-render");
+
+		await retype(browser, "h1", "Heading", "Encabezado");
+		await until(() => line(1) === "# Encabezado", `a changed header: ${line(1)}`);
+
+		await retype(browser, "tbody td:nth-child(2)", "a", "z");
+		await until(() => line(7) === "| a b  | z     |", `the second cell, not the first "a": ${line(7)}`);
+
+		await until(() => browser.js(`!!document.querySelector("p a")`), "the link to render");
+		await retype(browser, "p", "link", "enlace");
+		await until(() => line(3) === "Plain **bold** sentence with a [enlace](other.md) inside.", `text inside a link: ${line(3)}`);
+
+		await until(() => browser.js(`document.querySelector("p").textContent.includes("enlace")`), "the page to re-render");
+		await retype(browser, "p", "bold", "");
+		await until(() => line(3) === "Plain  sentence with a [enlace](other.md) inside.", `emptied bold drops its markers: ${line(3)}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
+	async "edit: fall back to Markdown, refuse stale lines, hold updates"({ nvim, browser }) {
+		const file = join(nvim.root, "edit.md");
+		writeFileSync(file, EDIT_FIXTURE);
+		const line = (n) => readLines(file)[n - 1];
+		await browser.open("/edit.md");
+		await press(browser, "e");
+		assert(await browser.js(`document.body.classList.contains("lp-edit-mode")`), "e turns on edit mode");
+
+		await retype(browser, "h1", "Heading", "2*3*4");
+		await until(() => browser.js(`document.querySelector(".lp-raw")?.value === "# 2*3*4"`), "Markdown that would not render as typed opens raw");
+		assert(line(1) === "# Heading", "nothing is written before the raw edit ends");
+		await browser.js(`(() => { const raw = document.querySelector(".lp-raw"); raw.value = ${JSON.stringify("# 2\\*3\\*4")}; raw.blur(); })()`);
+		await until(() => line(1) === "# 2\\*3\\*4", `the raw edit is written: ${line(1)}`);
+		await until(() => browser.js(`document.querySelector("h1").textContent === "2*3*4"`), "the escaped header to render");
+
+		assert(await browser.js(selectIn("p", "paragraph")), "focus the paragraph");
+		await browser.cdp("Input.insertText", { text: "typed" });
+		const client = socketClient();
+		await client.opened;
+		await client.request("source.replace", { path: "/edit.md", start_line: 7, end_line: 7, expected: ["| a b  | a     |"], lines: ["| c    | d     |"] });
+		await sleep(300);
+		assert(await browser.js(`document.querySelector("p").textContent.includes("typed")`), "an update waits while a block is edited");
+		await press(browser, "Enter");
+		await until(() => line(3).includes("typed") && line(7) === "| c    | d     |", "both edits on disk");
+		await until(() => browser.js(`document.querySelector("tbody td").textContent === "c"`), "the held update renders after the edit");
+
+		assert(await browser.js(selectIn("p", "Plain")), "focus the paragraph again");
+		nvim.lua(`local b = vim.fn.bufadd("${file}"); vim.fn.bufload(b); vim.api.nvim_buf_set_lines(b, 2, 3, true, { "from nvim" }); vim.api.nvim_buf_call(b, function() vim.cmd("silent write") end); return true`);
+		await browser.cdp("Input.insertText", { text: "Stale" });
+		await press(browser, "Enter");
+		await until(() => browser.js(`!!document.querySelector(".lp-toast--error")`), "a refused edit is reported");
+		assert(line(3) === "from nvim", `a stale edit writes nothing: ${line(3)}`);
 		client.close();
 	},
 
@@ -178,11 +295,11 @@ const tests = {
 	async "cache: a page reflects the Neovim serving it"({ browser }, restart) {
 		let nvim = await restart({ env: { LP_NO_COMMENTS: "1" } });
 		await browser.open("/a.md");
-		assert(await browser.js(`!document.querySelector(".lp-topbar")`), "no comment UI without a provider");
+		assert(await browser.js(`!document.querySelector(".lp-panel")`), "no comment UI without a provider");
 		await nvim.stop();
 		nvim = await restart();
 		await browser.open("/a.md");
-		assert(await browser.js(`!!document.querySelector(".lp-topbar")`), "a reload picks up the new config");
+		assert(await browser.js(`!!document.querySelector(".lp-panel")`), "a reload picks up the new config");
 		return nvim;
 	},
 };

@@ -109,6 +109,7 @@ export async function startBrowser() {
 	return {
 		errors,
 		js,
+		cdp: call,
 		async open(path) {
 			await call("Page.navigate", { url: ORIGIN + path });
 			await until(() => js(`!!document.querySelector(".markdown-body [data-source-line]")`), `${path} to render`);

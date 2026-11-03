@@ -27,9 +27,23 @@ md.use(markdownitKatex);
 // the rendered blocks keep their source line numbers.
 const withoutFrontMatter = (text) => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, (block) => block.replace(/[^\n]/g, ""));
 
+const livepreview_toHtml = (text) => md.render(withoutFrontMatter(text));
+
+// The Markdown the page shows, which edits made in the page are patches of.
+let livepreview_source = "";
+// Replaced by the edit script: true while a block is being edited, so an update
+// from Neovim waits instead of wiping what is being typed.
+let livepreview_holdRender = () => false;
+let livepreview_heldText = null;
+
 const livepreview_render = (text) => {
-	const html = md.render(withoutFrontMatter(text));
-	document.querySelector('.markdown-body').innerHTML = html;
+	if (livepreview_holdRender()) {
+		livepreview_heldText = text;
+		return;
+	}
+	livepreview_heldText = null;
+	livepreview_source = text;
+	document.querySelector('.markdown-body').innerHTML = livepreview_toHtml(text);
 	hljs.highlightAll();
 }
 

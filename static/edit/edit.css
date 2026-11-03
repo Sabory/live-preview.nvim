@@ -1,0 +1,70 @@
+/* Also here because the comments stylesheet, which places the topbar, is only
+   loaded with a comment provider. */
+.lp-topbar {
+	position: fixed;
+	top: 8px;
+	right: 12px;
+	z-index: 30;
+	display: flex;
+	gap: 6px;
+	align-items: flex-start;
+}
+
+.lp-edit-toggle {
+	display: flex;
+	align-items: center;
+	height: 28px;
+	padding: 4px 8px;
+	color: var(--lp-fg, #1f2328);
+	background: var(--lp-raised, #f6f8fa);
+	border: 1px solid var(--lp-border, #d0d7de);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.lp-edit-toggle svg {
+	width: 16px;
+	height: 16px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linejoin: round;
+}
+
+.lp-edit-toggle[aria-pressed="true"] {
+	color: var(--lp-accent-fg, #ffffff);
+	background: var(--lp-accent, #0969da);
+	border-color: var(--lp-accent, #0969da);
+}
+
+.lp-edit-mode .markdown-body [contenteditable] {
+	outline: none;
+	border-radius: 4px;
+	cursor: text;
+}
+
+.lp-edit-mode .markdown-body [contenteditable]:hover {
+	background: rgba(127, 127, 127, 0.06);
+}
+
+.lp-edit-mode .markdown-body [contenteditable]:focus {
+	background: rgba(127, 127, 127, 0.1);
+}
+
+/* Selecting text to edit it is not selecting it to comment. */
+.lp-edit-mode .lp-selection-button {
+	display: none;
+}
+
+.markdown-body .lp-raw {
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	padding: 6px 8px;
+	font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: inherit;
+	background: rgba(127, 127, 127, 0.1);
+	border: 1px solid var(--lp-accent, #0969da);
+	border-radius: 4px;
+	resize: vertical;
+}
