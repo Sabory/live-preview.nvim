@@ -1,4 +1,6 @@
 // End-to-end tests: `make e2e`, or `node tests/e2e/run.mjs [name filter]`.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assert, sleep, startBrowser, startNvim, until, ORIGIN } from "./lib.mjs";
 
 const selectAndComment = (selector, from, to) => `(() => {
@@ -61,6 +63,35 @@ const tests = {
 		await until(() => client.inbox.some((m) => m.type === "navigate" && m.path === "/other.md"), "a navigate message");
 		client.send({ type: "open", path: "/a.md" });
 		await until(() => nvim.expr("expand('%:t')") === "a.md", "open to move the source window");
+		client.close();
+	},
+
+	async "server: replace source lines and write them to disk"({ nvim }) {
+		const client = socketClient();
+		await client.opened;
+		const file = join(nvim.root, "a.md");
+		const before = readFileSync(file, "utf8").split("\n");
+		const replaced = await client.request("source.replace", {
+			path: "/a.md",
+			start_line: 6,
+			end_line: 6,
+			expected: [before[5]],
+			lines: ["# Renamed"],
+		});
+		assert(!replaced.error, `replace: ${replaced.error}`);
+		assert(readFileSync(file, "utf8").split("\n")[5] === "# Renamed", "the line is written to disk");
+		assert(nvim.expr("&modified") === "0", "the buffer is saved");
+		await until(() => client.inbox.some((m) => m.type === "update" && m.content.includes("# Renamed")), "an update broadcast");
+
+		const inserted = await client.request("source.replace", { path: "/a.md", start_line: 7, end_line: 6, expected: [], lines: ["new"] });
+		assert(!inserted.error && readFileSync(file, "utf8").split("\n")[6] === "new", `insert before a line: ${inserted.error}`);
+
+		const stale = await client.request("source.replace", { path: "/a.md", start_line: 6, end_line: 6, expected: [before[5]], lines: ["x"] });
+		assert(stale.error?.includes("changed"), `stale lines are refused: ${JSON.stringify(stale)}`);
+		assert(readFileSync(file, "utf8").split("\n")[5] === "# Renamed", "a refused edit writes nothing");
+
+		const hidden = await client.request("source.replace", { path: "/other.md", start_line: 1, end_line: 0, expected: [], lines: ["top"] });
+		assert(!hidden.error && readFileSync(join(nvim.root, "other.md"), "utf8").startsWith("top\n"), `a file not open in Neovim: ${hidden.error}`);
 		client.close();
 	},
 
