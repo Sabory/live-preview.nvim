@@ -6,8 +6,13 @@
 		'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
 	const EDITABLE = "p, h1, h2, h3, h4, h5, h6, li, th, td";
 	const FROZEN = "pre, .katex, .mermaid";
+	const MARKS = { bold: "**", italic: "*", strike: "~~", code: "`" };
+	const SHORTCUTS = { b: "bold", i: "italic", e: "code", k: "link", S: "strike" };
 
 	let editing = null; // { host, anchor, path, before }
+	// Neovim broadcasts the new source before it replies, so an edit patched
+	// after the previous write settles is patched against what is on disk.
+	let lastWrite = Promise.resolve();
 
 	const markdownBody = () => document.querySelector(".markdown-body");
 	const currentPath = () => decodeURIComponent(window.location.pathname);
@@ -55,6 +60,12 @@
 		const path = [];
 		for (; node !== anchor; node = node.parentElement) path.unshift([...node.parentElement.children].indexOf(node));
 		return path;
+	}
+
+	function findHost(root, { tag, startLine, endLine, path }) {
+		let node = root.querySelector(`${tag}[data-source-line="${startLine}"][data-source-end="${endLine}"]`);
+		for (const index of path) node = node && node.children[index];
+		return node;
 	}
 
 	// The part of the block's source a host's text comes from: a table cell is
@@ -105,64 +116,92 @@
 	// Deleting all the text of a bold or code span leaves its markers behind.
 	const withoutEmptyMarkup = (text) => text.replace(/(\*\*|__|~~|\*|_|`)\1/g, "");
 
-	function rendersAs(lines, anchor, path, text) {
+	// Where a block's edit goes: its lines, and the whole page with them replaced.
+	function targetOf({ host, anchor, path }) {
+		const [startLine, endLine] = lineRange(anchor);
+		const lines = livepreview_source.split("\n");
+		const expected = lines.slice(startLine - 1, endLine);
+		return {
+			host,
+			where: { tag: anchor.tagName.toLowerCase(), startLine, endLine, path },
+			expected,
+			page: (block) => [...lines.slice(0, startLine - 1), ...block.split("\n"), ...lines.slice(endLine)],
+		};
+	}
+
+	function rendersAs(target, block, text) {
 		const page = document.createElement("div");
-		page.innerHTML = livepreview_toHtml(lines.join("\n"));
-		const [start, end] = lineRange(anchor);
-		let node = page.querySelector(
-			`${anchor.tagName.toLowerCase()}[data-source-line="${start}"][data-source-end="${end}"]`,
-		);
-		for (const index of path) node = node && node.children[index];
+		page.innerHTML = livepreview_toHtml(target.page(block).join("\n"));
+		const node = findHost(page, target.where);
 		return !!node && normalize(node.textContent) === normalize(text);
 	}
 
-	function replace(startLine, endLine, expected, lines) {
-		return livepreview_request("source.replace", {
+	// The block's source with what was typed in it, { attempt } when no patch
+	// renders as typed, or { conflict } when the block changed under the edit.
+	function typedSource(state, after) {
+		const target = targetOf(state);
+		const block = target.expected.join("\n");
+		if (!rendersAs(target, block, state.before)) return { target, conflict: true };
+		if (after === state.before) return { target, block };
+		const [from, to] = scopeOf(state.host, block);
+		const scoped = patch(block.slice(from, to), state.before, changedSpan(state.before, after));
+		for (const candidate of [scoped, withoutEmptyMarkup(scoped)]) {
+			const patched = block.slice(0, from) + candidate + block.slice(to);
+			if (rendersAs(target, patched, after)) return { target, block: patched };
+		}
+		return { target, attempt: block.slice(0, from) + scoped + block.slice(to) };
+	}
+
+	function write(target, block) {
+		const { startLine, endLine } = target.where;
+		const request = () => livepreview_request("source.replace", {
 			path: currentPath(),
 			start_line: startLine,
 			end_line: endLine,
-			expected,
-			lines,
-		}).catch((error) => {
-			toast(error.message);
-			livepreview_render(livepreview_source);
-		});
+			expected: target.expected,
+			lines: block.split("\n"),
+		}).then(
+			() => true,
+			(error) => {
+				toast(error.message);
+				livepreview_render(livepreview_source);
+				return false;
+			},
+		);
+		lastWrite = lastWrite.then(request);
+		return lastWrite;
 	}
 
 	// --- Committing a block -----------------------------------------------------
 
-	function commit({ host, anchor, path, before }) {
-		const after = host.textContent;
-		if (after === before) return;
-		const [startLine, endLine] = lineRange(anchor);
-		const lines = livepreview_source.split("\n");
-		const expected = lines.slice(startLine - 1, endLine);
-		const block = expected.join("\n");
-		const [from, to] = scopeOf(host, block);
-		const scoped = patch(block.slice(from, to), before, changedSpan(before, after));
-		const withPage = (candidate) => [...lines.slice(0, startLine - 1), ...candidate.split("\n"), ...lines.slice(endLine)];
-		for (const candidate of [scoped, withoutEmptyMarkup(scoped)]) {
-			const patched = block.slice(0, from) + candidate + block.slice(to);
-			if (rendersAs(withPage(patched), anchor, path, after)) {
-				return replace(startLine, endLine, expected, patched.split("\n"));
-			}
-		}
-		openRaw(host, startLine, endLine, expected, block.slice(0, from) + scoped + block.slice(to));
+	async function commit(state) {
+		const after = state.host.textContent;
+		if (after === state.before) return;
+		await lastWrite;
+		const { target, block, attempt, conflict } = typedSource(state, after);
+		if (conflict) refuse();
+		else if (block !== undefined) write(target, block);
+		else openRaw(target, attempt);
+	}
+
+	function refuse() {
+		toast("This block changed in Neovim; your edit was not saved");
+		livepreview_render(livepreview_source);
 	}
 
 	// The patch would not render as typed: show the block's Markdown instead,
 	// the way Obsidian does, and write whatever is left there.
-	function openRaw(host, startLine, endLine, expected, text) {
+	function openRaw(target, text) {
 		const raw = document.createElement("textarea");
 		raw.className = "lp-raw";
 		raw.value = text;
 		raw.rows = text.split("\n").length;
-		host.removeAttribute("contenteditable");
-		host.replaceChildren(raw);
+		target.host.removeAttribute("contenteditable");
+		target.host.replaceChildren(raw);
 		editing = { raw };
 		const done = () => {
 			editing = null;
-			replace(startLine, endLine, expected, raw.value.split("\n")).then(flushHeldRender);
+			write(target, raw.value).then(flushHeldRender);
 		};
 		raw.addEventListener("blur", done, { once: true });
 		raw.addEventListener("keydown", (event) => {
@@ -175,26 +214,194 @@
 		if (!editing && livepreview_heldText !== null) livepreview_render(livepreview_heldText);
 	}
 
+	// --- Formatting a selection --------------------------------------------------
+
+	function selectionIn(host) {
+		const selection = getSelection();
+		if (!selection.rangeCount || selection.isCollapsed) return null;
+		const range = selection.getRangeAt(0);
+		if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return null;
+		const offset = (container, at) => {
+			const before = document.createRange();
+			before.setStart(host, 0);
+			before.setEnd(container, at);
+			return before.toString().length;
+		};
+		const text = host.textContent;
+		let start = offset(range.startContainer, range.startOffset);
+		let end = offset(range.endContainer, range.endOffset);
+		// Markdown does not format a span that starts or ends with a space.
+		while (start < end && /\s/.test(text[start])) start++;
+		while (end > start && /\s/.test(text[end - 1])) end--;
+		return start < end ? { start, end } : null;
+	}
+
+	function pointAt(host, offset) {
+		const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+		let last = null;
+		for (let node = walker.nextNode(), seen = 0; node; seen += node.length, node = walker.nextNode()) {
+			if (offset <= seen + node.length) return [node, offset - seen];
+			last = node;
+		}
+		return last && [last, last.length];
+	}
+
+	function selectText(host, { start, end }) {
+		const [from, to] = [pointAt(host, start), pointAt(host, end)];
+		if (!from || !to) return;
+		const range = document.createRange();
+		range.setStart(...from);
+		range.setEnd(...to);
+		getSelection().removeAllRanges();
+		getSelection().addRange(range);
+	}
+
+	const wrappedBy = (text, start, end, mark) =>
+		text.slice(start - mark.length, start) === mark &&
+		text.slice(end, end + mark.length) === mark &&
+		(mark !== "*" || (text[start - 2] !== "*" && text[end + 1] !== "*"));
+
+	function wrap(scoped, start, end, kind, url) {
+		const inner = scoped.slice(start, end);
+		if (kind === "link") return scoped.slice(0, start) + `[${inner}](${url})` + scoped.slice(end);
+		const mark = MARKS[kind];
+		if (wrappedBy(scoped, start, end, mark)) {
+			return scoped.slice(0, start - mark.length) + inner + scoped.slice(end + mark.length);
+		}
+		return scoped.slice(0, start) + mark + inner + mark + scoped.slice(end);
+	}
+
+	// Writes the format and puts the caret back on the same words once the page
+	// has re-rendered, so formatting does not end the edit.
+	async function format(kind, url, selection = editing && selectionIn(editing.host)) {
+		const state = editing;
+		if (!state || !selection) return;
+		const text = state.host.textContent;
+		await lastWrite;
+		const { target, block, attempt, conflict } = typedSource(state, text);
+		if (conflict) return refuse();
+		if (block === undefined) return openRaw(target, attempt);
+		const [from, to] = scopeOf(state.host, block);
+		const scoped = block.slice(from, to);
+		const at = align(text, scoped);
+		const formatted = block.slice(0, from) + wrap(scoped, at[selection.start], at[selection.end - 1] + 1, kind, url) + block.slice(to);
+		if (!rendersAs(target, formatted, text)) return openRaw(target, formatted);
+		editing = null;
+		hideToolbar();
+		state.host.blur();
+		if (!(await write(target, formatted))) return;
+		const host = findHost(markdownBody(), target.where);
+		if (!host) return;
+		host.focus();
+		selectText(host, selection);
+	}
+
+	const toolbarButton = (kind, label, title) => {
+		const button = document.createElement("button");
+		button.dataset.format = kind;
+		button.innerHTML = label;
+		button.title = title;
+		button.addEventListener("mousedown", (event) => event.preventDefault()); // keep the selection
+		button.addEventListener("click", () => (kind === "link" ? openLinkInput() : format(kind)));
+		return button;
+	};
+	const linkInput = Object.assign(document.createElement("input"), { placeholder: "Paste a link…", hidden: true });
+	const toolbar = document.createElement("div");
+	toolbar.className = "lp-format";
+	toolbar.hidden = true;
+	toolbar.append(
+		toolbarButton("bold", "<b>B</b>", "Bold (⌘B)"),
+		toolbarButton("italic", "<i>I</i>", "Italic (⌘I)"),
+		toolbarButton("strike", "<s>S</s>", "Strikethrough (⌘⇧S)"),
+		toolbarButton("code", "<code>&lt;/&gt;</code>", "Code (⌘E)"),
+		toolbarButton("link", "Link", "Link (⌘K)"),
+		linkInput,
+	);
+
+	function hideToolbar() {
+		toolbar.hidden = true;
+		linkInput.hidden = true;
+		if (window.CSS && CSS.highlights) CSS.highlights.delete("lp-link-target");
+	}
+
+	function showToolbarOver(range) {
+		const rect = range.getBoundingClientRect();
+		toolbar.hidden = false;
+		toolbar.style.top = `${rect.top + window.scrollY - toolbar.offsetHeight - 8}px`;
+		const left = Math.min(rect.left, document.documentElement.clientWidth - toolbar.offsetWidth - 8);
+		toolbar.style.left = `${Math.max(8, left) + window.scrollX}px`;
+	}
+
+	function placeToolbar() {
+		if (!linkInput.hidden) return;
+		const selection = editing && editing.host && selectionIn(editing.host);
+		if (!selection) return hideToolbar();
+		showToolbarOver(getSelection().getRangeAt(0));
+	}
+
+	// The link input takes the focus, so the selection it applies to is kept.
+	let linkSelection = null;
+	function openLinkInput() {
+		linkSelection = editing && selectionIn(editing.host);
+		if (!linkSelection) return;
+		const range = getSelection().getRangeAt(0).cloneRange();
+		// The input takes the focus and the selection with it; keep the words marked.
+		if (window.CSS && CSS.highlights) CSS.highlights.set("lp-link-target", new Highlight(range));
+		linkInput.hidden = false;
+		showToolbarOver(range);
+		linkInput.value = "";
+		linkInput.focus();
+	}
+
+	linkInput.addEventListener("keydown", (event) => {
+		if (event.key === "Enter" && linkInput.value.trim()) {
+			event.preventDefault();
+			format("link", linkInput.value.trim(), linkSelection);
+		} else if (event.key === "Escape") {
+			hideToolbar();
+			if (editing) {
+				editing.host.focus();
+				selectText(editing.host, linkSelection);
+			}
+		}
+	});
+	linkInput.addEventListener("blur", () => {
+		hideToolbar();
+		if (editing && document.activeElement !== editing.host) {
+			const state = editing;
+			editing = null;
+			commit(state);
+			flushHeldRender();
+		}
+	});
+
 	// --- Wiring -------------------------------------------------------------
 
 	document.addEventListener("focusin", (event) => {
 		const host = event.target.closest && event.target.closest("[contenteditable]");
-		if (!host || !markdownBody().contains(host)) return;
+		if (!host || !markdownBody().contains(host) || (editing && editing.host === host)) return;
 		const anchor = host.closest("[data-source-line]");
 		editing = { host, anchor, path: pathFrom(anchor, host), before: host.textContent };
 	});
 
 	document.addEventListener("focusout", (event) => {
-		if (!editing || event.target !== editing.host) return;
-		const current = editing;
+		if (!editing || event.target !== editing.host || toolbar.contains(event.relatedTarget)) return;
+		const state = editing;
 		editing = null;
-		commit(current);
-		flushHeldRender();
+		hideToolbar();
+		commit(state);
+		// Re-rendering now would replace the block that is taking the focus.
+		const next = event.relatedTarget;
+		if (!(next && next.closest && next.closest("[contenteditable]") && markdownBody().contains(next))) flushHeldRender();
 	});
 
 	document.addEventListener("keydown", (event) => {
 		if (editing && event.target === editing.host) {
-			if (event.key === "Enter" || event.key === "Escape") {
+			const kind = (event.metaKey || event.ctrlKey) && SHORTCUTS[event.shiftKey ? event.key.toUpperCase() : event.key];
+			if (kind) {
+				event.preventDefault();
+				kind === "link" ? openLinkInput() : format(kind);
+			} else if (event.key === "Enter" || event.key === "Escape") {
 				event.preventDefault();
 				editing.host.blur();
 			}
@@ -208,6 +415,8 @@
 		}
 	});
 
+	document.addEventListener("selectionchange", () => requestAnimationFrame(placeToolbar));
+
 	// A link inside an editable block places the caret instead of navigating.
 	document.addEventListener(
 		"click",
@@ -219,8 +428,10 @@
 
 	livepreview_holdRender = () => editing !== null;
 	const topbar =
-		document.querySelector(".lp-topbar") || document.body.appendChild(Object.assign(document.createElement("div"), { className: "lp-topbar" }));
+		document.querySelector(".lp-topbar") ||
+		document.body.appendChild(Object.assign(document.createElement("div"), { className: "lp-topbar" }));
 	topbar.prepend(toggle);
+	document.body.append(toolbar);
 	new MutationObserver(markHosts).observe(markdownBody(), { childList: true });
 	setEditMode(false);
 })();

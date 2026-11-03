@@ -29,8 +29,12 @@ async function clickOn(browser, selector) {
 	}
 }
 
-const press = async (browser, key, code = key) => {
-	for (const type of ["keyDown", "keyUp"]) await browser.cdp("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: key === "Enter" ? 13 : 0 });
+const META = 4;
+const SHIFT = 8;
+const press = async (browser, key, code = key, modifiers = 0) => {
+	for (const type of ["keyDown", "keyUp"]) {
+		await browser.cdp("Input.dispatchKeyEvent", { type, key, code, modifiers, windowsVirtualKeyCode: key === "Enter" ? 13 : 0 });
+	}
 };
 
 // Focuses the editable block and selects `needle` in it, as a double click would.
@@ -50,6 +54,13 @@ const selectIn = (selector, needle) => `(() => {
 	}
 	return false;
 })()`;
+
+// Text the page shows right after typing is what was typed: only the source it
+// received from Neovim proves the edit made the round trip.
+const received = (browser, text) => until(() => browser.js(`livepreview_source.includes(${JSON.stringify(text)})`), `the page to receive "${text}"`);
+
+// The format toolbar moves to a new selection on the next animation frame.
+const nextFrames = (browser) => browser.js(`new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))`);
 
 async function retype(browser, selector, needle, text) {
 	assert(await browser.js(selectIn(selector, needle)), `"${needle}" in ${selector}`);
@@ -152,14 +163,14 @@ const tests = {
 	async "edit: reword a paragraph, a header and a table cell"({ nvim, browser }) {
 		const file = join(nvim.root, "edit.md");
 		writeFileSync(file, EDIT_FIXTURE);
-		const line = (n) => readLines(file)[n - 1];
+		const line = (n) => readLines(file)[n - 1] ?? "";
 		await browser.open("/edit.md");
 		await clickOn(browser, ".lp-edit-toggle");
 		assert(await browser.js(`document.querySelector("p").getAttribute("contenteditable") === "plaintext-only"`), "the pencil makes blocks editable");
 
 		await retype(browser, "p", "paragraph", "sentence");
 		await until(() => line(3) === "Plain **bold** sentence with a [link](other.md) inside.", `a reworded paragraph: ${line(3)}`);
-		await until(() => browser.js(`document.querySelector("p").textContent.includes("sentence")`), "the page to re-render");
+		await received(browser, "sentence");
 
 		await retype(browser, "h1", "Heading", "Encabezado");
 		await until(() => line(1) === "# Encabezado", `a changed header: ${line(1)}`);
@@ -167,20 +178,25 @@ const tests = {
 		await retype(browser, "tbody td:nth-child(2)", "a", "z");
 		await until(() => line(7) === "| a b  | z     |", `the second cell, not the first "a": ${line(7)}`);
 
-		await until(() => browser.js(`!!document.querySelector("p a")`), "the link to render");
+		await received(browser, "| z ");
 		await retype(browser, "p", "link", "enlace");
 		await until(() => line(3) === "Plain **bold** sentence with a [enlace](other.md) inside.", `text inside a link: ${line(3)}`);
 
-		await until(() => browser.js(`document.querySelector("p").textContent.includes("enlace")`), "the page to re-render");
+		await received(browser, "[enlace]");
 		await retype(browser, "p", "bold", "");
 		await until(() => line(3) === "Plain  sentence with a [enlace](other.md) inside.", `emptied bold drops its markers: ${line(3)}`);
+
+		await received(browser, "Plain  sentence");
+		await retype(browser, "p", "Plain", "Simple");
+		await retype(browser, "p", "sentence", "frase");
+		await until(() => line(3) === "Simple  frase with a [enlace](other.md) inside.", `two edits in a row, the second before the first renders: ${line(3)}`);
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
 	async "edit: fall back to Markdown, refuse stale lines, hold updates"({ nvim, browser }) {
 		const file = join(nvim.root, "edit.md");
 		writeFileSync(file, EDIT_FIXTURE);
-		const line = (n) => readLines(file)[n - 1];
+		const line = (n) => readLines(file)[n - 1] ?? "";
 		await browser.open("/edit.md");
 		await press(browser, "e");
 		assert(await browser.js(`document.body.classList.contains("lp-edit-mode")`), "e turns on edit mode");
@@ -207,9 +223,62 @@ const tests = {
 		nvim.lua(`local b = vim.fn.bufadd("${file}"); vim.fn.bufload(b); vim.api.nvim_buf_set_lines(b, 2, 3, true, { "from nvim" }); vim.api.nvim_buf_call(b, function() vim.cmd("silent write") end); return true`);
 		await browser.cdp("Input.insertText", { text: "Stale" });
 		await press(browser, "Enter");
-		await until(() => browser.js(`!!document.querySelector(".lp-toast--error")`), "a refused edit is reported");
+		await until(() => browser.js(`document.querySelector(".lp-toast--error")?.textContent.includes("changed")`), "a refused edit is reported");
 		assert(line(3) === "from nvim", `a stale edit writes nothing: ${line(3)}`);
 		client.close();
+	},
+
+	async "edit: format a selection from the toolbar and shortcuts"({ nvim, browser }) {
+		const file = join(nvim.root, "edit.md");
+		writeFileSync(file, EDIT_FIXTURE);
+		const line = (n) => readLines(file)[n - 1] ?? "";
+		const original = EDIT_FIXTURE.split("\n")[2];
+		await browser.open("/edit.md");
+		await press(browser, "e");
+
+		assert(await browser.js(selectIn("p", "paragraph")), "select a word");
+		await until(() => browser.js(`!document.querySelector(".lp-format").hidden`), "the toolbar over the selection");
+		await press(browser, "b", "KeyB", META);
+		await until(() => line(3) === "Plain **bold** **paragraph** with a [link](other.md) inside.", `bold: ${line(3)}`);
+		await until(
+			() => browser.js(`document.activeElement === document.querySelector("p") && getSelection().toString() === "paragraph"`),
+			"the selection to stay on the formatted words",
+		);
+		await press(browser, "b", "KeyB", META);
+		await until(() => line(3) === original, `bold toggles off: ${line(3)}`);
+		await until(() => browser.js(`document.querySelectorAll("p strong").length === 1`), "the unbolded render");
+
+		assert(await browser.js(selectIn("p", "Plain")), "select the first word");
+		await nextFrames(browser);
+		await clickOn(browser, '.lp-format [data-format="italic"]');
+		await until(() => line(3).startsWith("*Plain* **bold**"), `italic: ${line(3)}`);
+		await until(() => browser.js(`!!document.querySelector("p em")`), "the italic render");
+
+		assert(await browser.js(selectIn("p", "with")), "select another word");
+		await press(browser, "S", "KeyS", META | SHIFT);
+		await until(() => line(3).includes(" ~~with~~ "), `strikethrough: ${line(3)}`);
+		await until(() => browser.js(`!!document.querySelector("p s")`), "the strikethrough render");
+
+		assert(await browser.js(selectIn("h1", "Heading")), "select the header");
+		await nextFrames(browser);
+		await clickOn(browser, '.lp-format [data-format="code"]');
+		await until(() => line(1) === "# `Heading`", `code: ${line(1)}`);
+		await until(() => browser.js(`!!document.querySelector("h1 code")`), "the code render");
+
+		assert(await browser.js(selectIn("p", "inside")), "select the word to link");
+		await press(browser, "k", "KeyK", META);
+		await until(() => browser.js(`document.activeElement === document.querySelector(".lp-format input")`), "the link input");
+		await browser.cdp("Input.insertText", { text: "https://example.com" });
+		await press(browser, "Enter");
+		await until(() => line(3).endsWith(" [inside](https://example.com)."), `link: ${line(3)}`);
+		await until(() => browser.js(`!!document.querySelector('p a[href="https://example.com"]')`), "the link render");
+
+		assert(await browser.js(selectIn("tbody td", "a b")), "select a cell's text");
+		await browser.cdp("Input.insertText", { text: "uno dos" });
+		assert(await browser.js(selectIn("tbody td", "uno")), "select a typed word");
+		await press(browser, "b", "KeyB", META);
+		await until(() => line(7) === "| **uno** dos  | a     |", `typed text and its format in one write: ${line(7)}`);
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
 	},
 
 	async "render: front matter, line ranges and alerts"({ browser }) {

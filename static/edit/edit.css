@@ -68,3 +68,57 @@
 	border-radius: 4px;
 	resize: vertical;
 }
+
+.lp-format {
+	position: absolute;
+	z-index: 40;
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+	font: 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	color: var(--lp-fg, #1f2328);
+	background: var(--lp-surface, #ffffff);
+	border: 1px solid var(--lp-border, #d0d7de);
+	border-radius: 8px;
+	box-shadow: var(--lp-shadow, 0 8px 24px rgba(140, 149, 159, 0.3));
+}
+
+.lp-format[hidden] {
+	display: none;
+}
+
+.lp-format button {
+	min-width: 28px;
+	height: 28px;
+	padding: 0 8px;
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: none;
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+.lp-format button:hover {
+	background: var(--lp-raised, #f6f8fa);
+}
+
+.lp-format code {
+	font-size: 12px;
+	background: none;
+}
+
+.lp-format input {
+	width: 220px;
+	padding: 0 8px;
+	font: inherit;
+	color: inherit;
+	background: var(--lp-raised, #f6f8fa);
+	border: 1px solid var(--lp-border, #d0d7de);
+	border-radius: 5px;
+	outline: none;
+}
+
+::highlight(lp-link-target) {
+	background-color: rgba(9, 105, 218, 0.3);
+}
