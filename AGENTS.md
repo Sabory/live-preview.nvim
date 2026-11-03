@@ -28,11 +28,29 @@ Every feature is checked end to end before it is called done.
   `Input.dispatchKeyEvent` presses keys, `clickOn()` clicks through the page's own handlers.
   Setting `textContent` or calling handlers directly skips what the feature depends on.
 - End every test with `browser.errors` empty.
+- A headless page has no system focus, so `focus()` fires no focus events unless the harness turns
+  on `Emulation.setFocusEmulationEnabled` (it does, in `startBrowser`). Without it, focus-driven
+  behavior passes or fails depending on whether an earlier CDP input happened to focus the page.
+- Text the page shows right after typing is what was typed, not proof of a round trip. Wait on
+  `livepreview_source` (`received()` in `run.mjs`) before the next step acts on the new source.
+- The format toolbar moves on the next animation frame after a selection: wait
+  (`nextFrames()`) before clicking it, or the click lands where the toolbar was.
+- Edit the same block twice in a row without waiting, and move straight from one block to
+  another: both hit a write or re-render still in flight, which is where the bugs were.
 - Run a suite twice before calling it green: timing bugs (renders, writes) pass once by luck.
+
+### Debugging a flaky or failing step
+
+Reproduce it alone in a throwaway script built on `tests/e2e/lib.mjs`, and log `focusin`,
+`focusout` (with `relatedTarget`) and re-renders of `.markdown-body` (a `MutationObserver`) with
+timestamps from inside the page. Every timing bug so far showed up as an unexpected render
+between two focus events.
 
 ### Visual QA
 
 Tests prove the file is right, not that the page looks right. Before committing UI, take
 screenshots with the same helpers (`startNvim`, `startBrowser`, `browser.screenshot`) on a
 realistic document, set the viewport with `Emulation.setDeviceMetricsOverride`, and look at
-them: read mode, a block being edited, the page after saving, and any fallback state.
+them: read mode, a block being edited, the page after saving, and any fallback state. Check
+overlays (toolbars, inputs) at the viewport edges too: one overflowed and scrolled the page
+sideways, which no test saw.
