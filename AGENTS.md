@@ -76,5 +76,6 @@ overlays (toolbars, inputs) at the viewport edges too: one overflowed and scroll
 sideways, which no test saw. Compare
 read mode and edit mode numerically too (`getBoundingClientRect().height` of the same block):
 Chrome forces `white-space: pre-wrap` on plaintext-only hosts, which no stylesheet overrides,
-and a nested list grew from 48px to 120px only in edit mode. Look at the block under the mouse as well: CDP leaves the pointer on the
+and a nested list grew from 48px to 120px only in edit mode. A control placed under a block (the
+table's "+ Row") needs room of its own: check it does not cover the next block. Look at the block under the mouse as well: CDP leaves the pointer on the
 last click, so its `:hover` style shows in the screenshot and can hide a selected state.
