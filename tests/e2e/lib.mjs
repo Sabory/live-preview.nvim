@@ -21,16 +21,37 @@ export async function until(check, what, timeout = 4000) {
 	throw new Error(`timed out waiting for ${what}`);
 }
 
+// WHY: the ports are fixed, so a Neovim or Chromium that outlives its run answers
+// the next run's health checks, and the next run then hangs on a stale page.
+const children = new Set();
+const track = (child) => {
+	children.add(child);
+	child.on("exit", () => children.delete(child));
+	return child;
+};
+process.on("exit", () => children.forEach((child) => child.kill()));
+for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+	process.on(signal, () => process.exit(code));
+}
+
+async function assertPortFree(url, owner) {
+	const answered = await fetch(url).then(() => true).catch(() => false);
+	assert(!answered, `${url} is already taken, probably by a ${owner} left over from an earlier run; stop it and retry`);
+}
+
 export async function startNvim({ file = "a.md", env = {} } = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "lp-e2e-"));
 	const socket = join(dir, "nvim.sock");
 	// Edits from the preview write to disk, so each Neovim serves its own copy.
 	const root = join(dir, "fixtures");
 	cpSync(join(here, "fixtures"), root, { recursive: true });
-	const nvim = spawn("nvim", ["--headless", "--clean", "--listen", socket, "-u", join(here, "init.lua")], {
-		env: { ...process.env, LP_PORT: PORT, LP_FILE: file, LP_ROOT: root, ...env },
-		stdio: "ignore",
-	});
+	await assertPortFree(ORIGIN, "Neovim");
+	const nvim = track(
+		spawn("nvim", ["--headless", "--clean", "--listen", socket, "-u", join(here, "init.lua")], {
+			env: { ...process.env, LP_PORT: PORT, LP_FILE: file, LP_ROOT: root, ...env },
+			stdio: "ignore",
+		}),
+	);
 	try {
 		await until(() => existsSync(socket), "nvim to listen");
 		await until(async () => (await fetch(ORIGIN).catch(() => null)) !== null, "the preview server");
@@ -67,10 +88,15 @@ function chromiumPath() {
 export async function startBrowser() {
 	const profile = mkdtempSync(join(tmpdir(), "lp-e2e-chrome-"));
 	const debugPort = 9333;
-	const chrome = spawn(
-		chromiumPath(),
-		["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--window-size=1100,800", "about:blank"],
-		{ stdio: "ignore" },
+	// Chromium may listen on IPv6 only, which a 127.0.0.1 probe would miss.
+	await assertPortFree(`http://127.0.0.1:${debugPort}/json`, "Chromium");
+	await assertPortFree(`http://[::1]:${debugPort}/json`, "Chromium");
+	const chrome = track(
+		spawn(
+			chromiumPath(),
+			["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--window-size=1100,800", "about:blank"],
+			{ stdio: "ignore" },
+		),
 	);
 	let targets;
 	await until(async () => {
