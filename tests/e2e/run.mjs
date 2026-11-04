@@ -1,5 +1,5 @@
 // End-to-end tests: `make e2e`, or `node tests/e2e/run.mjs [name filter]`.
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assert, sleep, startBrowser, startNvim, until, ORIGIN } from "./lib.mjs";
 
@@ -619,6 +619,66 @@ const tests = {
 		assert(alerts === `["markdown-alert-note","markdown-alert-tip","markdown-alert-important","markdown-alert-warning","markdown-alert-caution","BLOCKQUOTE"]`, `alerts: ${alerts}`);
 		assert(await browser.js(`!document.body.textContent.includes("[!")`), "no alert marker is left");
 		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+	},
+
+	async "plugins: provenance blocks render as callouts, only under their paths"({ nvim, browser }, restart) {
+		const PAGE = `# Rules
+
+<provenance-compendium-claim id="vc-rule" data-path="/references/compendium/c5.md" data-cite="L1 T3 A C5 N24.a">
+
+The fund sums every line.
+
+> Debe sumar las cotizaciones
+
+</provenance-compendium-claim>
+
+<provenance-decision id="our-call" data-informed-by="vc-rule">
+
+We prorate.
+
+</provenance-decision>
+`;
+		const write = (root) => {
+			mkdirSync(join(root, "docs/explanations"), { recursive: true });
+			writeFileSync(join(root, "docs/explanations/rules.md"), PAGE);
+		};
+		write(nvim.root);
+		await browser.open("/docs/explanations/rules.md");
+		await until(() => browser.js(`!!document.querySelector(".lp-pv-header")`), "the claim's header");
+		const claim = await browser.js(`(() => {
+			const block = document.querySelector("provenance-compendium-claim");
+			return JSON.stringify({
+				kind: block.querySelector(".lp-pv-kind").textContent,
+				cite: block.querySelector(".lp-pv-cite").textContent,
+				href: block.querySelector(".lp-pv-open").getAttribute("href"),
+				quote: !!block.querySelector("blockquote"),
+				path: block.querySelector(".lp-pv-path").textContent,
+			});
+		})()`);
+		assert(
+			claim === `{"kind":"Compendio","cite":"L1 T3 A C5 N24.a","href":"/docs/references/compendium/c5.md","quote":true,"path":"/references/compendium/c5.md"}`,
+			`the claim names and links its source: ${claim}`
+		);
+		const decision = await browser.js(`(() => {
+			const block = document.querySelector("provenance-decision");
+			return block.querySelector(".lp-pv-kind").textContent + "|" + block.querySelector(".lp-pv-meta a").getAttribute("href");
+		})()`);
+		assert(decision === "Decisión|#vc-rule", `the decision links what informs it: ${decision}`);
+
+		const file = join(nvim.root, "docs/explanations/rules.md");
+		await press(browser, "e");
+		await retype(browser, "provenance-compendium-claim > p", "every", "each");
+		await until(() => readLines(file).includes("The fund sums each line."), `text inside a block stays editable: ${readLines(file).join("\n")}`);
+		await received(browser, "sums each line");
+		await until(() => browser.js(`document.querySelectorAll("provenance-compendium-claim > .lp-pv-header").length === 1`), "one header after the re-render");
+		assert(browser.errors.length === 0, `page errors: ${browser.errors}`);
+
+		nvim = await restart({ env: { LP_PLUGIN_PATHS: "**/elsewhere/**" } });
+		write(nvim.root);
+		await browser.open("/docs/explanations/rules.md");
+		assert(await browser.js(`!document.querySelector("script[src*='plugins/provenance']")`), "the plugin stays out of other paths");
+		assert(await browser.js(`!document.querySelector(".lp-pv-header")`), "and the blocks render as plain HTML");
+		return nvim;
 	},
 
 	async "comments: select, comment, highlight, edit, delete, send"({ nvim, browser }) {

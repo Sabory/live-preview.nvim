@@ -36,6 +36,7 @@ require("livepreview.config").set({
 	hunks = function()
 		return _G.HUNKS
 	end,
+	plugins = { { name = "provenance", paths = { vim.env.LP_PLUGIN_PATHS or "**" } } },
 })
 vim.cmd.cd(vim.env.LP_ROOT)
 vim.cmd.edit(vim.env.LP_FILE or "a.md")
