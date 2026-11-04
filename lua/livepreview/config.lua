@@ -20,6 +20,7 @@ M.pickers = {
 ---@field comments LivePreviewCommentProvider|false? Enables commenting in the Markdown preview; see `livepreview.comments`
 ---@field hunks (fun(bufnr: integer): {type: "add"|"change"|"delete", start_line: integer, end_line: integer}[])|false? Changed lines to mark in the Markdown preview, e.g. from gitsigns
 ---@field file_tree boolean? Whether to list the root's Markdown files in a sidebar of the Markdown preview
+---@field plugins LivePreviewPlugin[]? Page plugins under `static/plugins/<name>/` to load in the Markdown preview
 M.default = {
 	picker = "",
 	address = "127.0.0.1",
@@ -30,7 +31,12 @@ M.default = {
 	comments = false,
 	hunks = false,
 	file_tree = true,
+	plugins = {},
 }
+
+---@class LivePreviewPlugin
+---@field name string folder under `static/plugins/` holding its `plugin.js` and `plugin.css`
+---@field paths string[]? globs of the files it loads for, e.g. `**/Developer/Fintual-AFP/**`; every file when nil
 
 M.config = vim.deepcopy(M.default)
 

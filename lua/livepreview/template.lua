@@ -53,7 +53,41 @@ local html_template = function(body, stylesheet, script_tag, after_ws_client)
     ]]
 end
 
-M.md2html = function(md)
+---@param plugin LivePreviewPlugin
+---@param file_path string?
+local function plugin_applies(plugin, file_path)
+	if not plugin.paths then
+		return true
+	end
+	if not file_path then
+		return false
+	end
+	for _, pattern in ipairs(plugin.paths) do
+		-- WHY: pages are built inside a libuv callback, where vim.fn is not allowed.
+		if vim.glob.to_lpeg(vim.fs.normalize(pattern)):match(file_path) then
+			return true
+		end
+	end
+	return false
+end
+
+---@param file_path string?
+local function plugin_tags(file_path)
+	local tags = ""
+	for _, plugin in ipairs(require("livepreview.config").config.plugins or {}) do
+		if plugin_applies(plugin, file_path) then
+			local base = "/live-preview.nvim/static/plugins/" .. plugin.name .. "/"
+			tags = tags
+				.. ([[<link rel="stylesheet" href="%splugin.css"><script defer src="%splugin.js"></script>]]):format(
+					base,
+					base
+				)
+		end
+	end
+	return tags
+end
+
+M.md2html = function(md, file_path)
 	local script =
 		[[<script defer src="/live-preview.nvim/static/markdown/line-numbers.js"></script><script defer src="/live-preview.nvim/static/markdown/alerts.js"></script><script defer src="/live-preview.nvim/static/markdown/tasks.js"></script><script defer src="/live-preview.nvim/static/markdown/markdown-it-emoji.min.js"></script><script defer src='/live-preview.nvim/static/markdown/markdown-it.min.js'></script><script defer src='/live-preview.nvim/static/markdown/markdown-it-katex.js'></script><script defer src='/live-preview.nvim/static/markdown/main.js'></script>]]
 	local stylesheet = [[<link rel="stylesheet" href="/live-preview.nvim/static/markdown/github-markdown.min.css">]]
@@ -73,6 +107,7 @@ M.md2html = function(md)
 	end
 	page_scripts = page_scripts
 		.. [[<link rel="stylesheet" href="/live-preview.nvim/static/edit/edit.css"><script defer src="/live-preview.nvim/static/edit/source.js"></script><script defer src="/live-preview.nvim/static/edit/blocks.js"></script><script defer src="/live-preview.nvim/static/edit/edit.js"></script><script defer src="/live-preview.nvim/static/edit/toolbar.js"></script><script defer src="/live-preview.nvim/static/edit/structure.js"></script>]]
+		.. plugin_tags(file_path)
 	return html_template(html_escape(md), stylesheet, script, page_scripts)
 end
 
@@ -89,9 +124,9 @@ M.svg2html = function(svg)
 		.. [[</div></body></html>]]
 end
 
-M.toHTML = function(text, filetype)
+M.toHTML = function(text, filetype, file_path)
 	if filetype == "markdown" then
-		return M.md2html(text)
+		return M.md2html(text, file_path)
 	elseif filetype == "asciidoc" then
 		return M.adoc2html(text)
 	elseif filetype == "svg" then
